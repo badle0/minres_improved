@@ -1,0 +1,13 @@
+# Ignore all dataset directories
+/2024minresdata/
+/test_matrices_and_vectors/
+/training/
+/lstsquare_training/
+/lstsquares_filtered_training/
+/poisson_filtered_training/
+^T
+
+x
+
+
+

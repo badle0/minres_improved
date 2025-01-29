@@ -1,0 +1,30 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--resolution", "64",
+                "--trained_model_type", "64",
+                "--float_type", "32",
+                "--model_index", "100",
+                "--example_type", "N/A",
+                "--frame_number", "1",
+                "--max_iter", "1000",
+                "--tolerance", "1.0e-12",
+                "--verbose_deepmr", "False",
+                "--dataset_dir", "/data/hsheng/virtualenvs/minres_improved/2024minresdata",
+                "--trained_model_dir", "/data/hsheng/virtualenvs/minres_improved/lstsquares_filtered_training/3D_N64/minres_improved",
+                "--CUDA_VISIBLE_DEVICES", "1"
+            ]
+        }
+    ]
+}
