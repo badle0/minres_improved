@@ -1,0 +1,6 @@
+2024minresdata/* filter=lfs diff=lfs merge=lfs -text
+test_matrices_and_vectors/* filter=lfs diff=lfs merge=lfs -text
+training/* filter=lfs diff=lfs merge=lfs -text
+lstsquare_training/* filter=lfs diff=lfs merge=lfs -text
+lstsquares_filtered_training/* filter=lfs diff=lfs merge=lfs -text
+poisson_filtered_training/* filter=lfs diff=lfs merge=lfs -text
