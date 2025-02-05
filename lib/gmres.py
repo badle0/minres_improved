@@ -4,6 +4,8 @@ import scipy.sparse as sparse
 import scipy.sparse.linalg as spla
 import tensorflow as tf
 
+
+# Solves non-symmetric and indefinite systems
 class GMRESSparse:
     def __init__(self, A_sparse):
         """
@@ -100,7 +102,9 @@ class GMRESSparse:
         """
         return np.where(self.A_sparse.getnnz(1) == 0)[0]
 
-    def gmres(self, b, x0, max_iter=100, rtol=1e-10, atol = 0., restart=None):
+
+    # HONGYI VERSION
+    def gmres_hongyi(self, b, x0, max_iter=100, rtol=1e-10, atol = 0., restart=None):
         """
         Solves the linear system Ax = b using the GMRES algorithm.
 
@@ -130,8 +134,10 @@ class GMRESSparse:
 
         lartg = get_lapack_funcs('lartg', dtype=x.dtype)
 
-        v = np.zeros((n, restart + 1))
-        h = np.zeros((restart + 1, restart))
+        #v = np.zeros((n, restart + 1))
+        #h = np.zeros((restart + 1, restart))
+        v = np.empty([restart+1, n], dtype=x.dtype)
+        h = np.zeros([restart, restart+1], dtype=x.dtype)
         givens = np.zeros([restart, 2])
         res = []
 
@@ -146,8 +152,8 @@ class GMRESSparse:
                     res = res + [rnorm_initial]
                     return x0, res
 
-            v[0, :] = r
-            tmp = np.linalg.pinv(v[0, :])
+            v[0, :] = r #ERROR HERE: ValueError: could not broadcast input array from shape (8,) into shape (9,)
+            tmp = np.linalg.norm(v[0, :])
             v[0, :] *= (1 / tmp)
             S = np.zeros(restart + 1)
             S[0] = tmp
@@ -218,3 +224,91 @@ class GMRESSparse:
 
         print(f"GMRES stopped after {max_iter} iterations with residual {rnorm}.")
         return x, res
+    
+    # GMRES algorithm from SCIPY modified with ChatGPT to be cleaner and mirror minres algorithm 
+    def gmres(self, b, x0, max_iter=100, rtol=1e-10, atol=0.0, restart=None):
+        """
+        Solves the linear system Ax = b using the GMRES algorithm.
+
+        Args:
+            b (np.array): The right-hand side vector.
+            x0 (np.array): The initial guess for the solution.
+            rtol (float): The relative tolerance for convergence.
+            atol (float): The absolute tolerance for convergence.
+            max_iter (int): The maximum number of iterations.
+            restart (int): Number of iterations between restarts.
+
+        Returns:
+            tuple: The solution vector x and the array of residuals.
+        """
+        n = len(b)
+        bnrm2 = np.linalg.norm(b)
+        atol = max(float(atol), float(rtol) * float(bnrm2))
+        if bnrm2 == 0:
+            return x0, [0]
+
+        eps = np.finfo(x0.dtype).eps
+        if restart is None:
+            restart = min(20, n)
+
+        x = x0.copy()
+        lartg = get_lapack_funcs('lartg', dtype=x.dtype)
+
+        res = []
+        for iteration in range(max_iter):
+            r = b - self.multiply_A(x)
+            rnorm = np.linalg.norm(r)
+            res.append(rnorm)
+
+            if rnorm <= rtol * bnrm2 + atol:
+                print(f"GMRES converged in {iteration + 1} iterations with residual {rnorm}.")
+                return x, res
+
+            v = np.zeros((restart + 1, n), dtype=x.dtype)
+            h = np.zeros((restart + 1, restart), dtype=x.dtype)
+            givens = np.zeros((restart, 2), dtype=x.dtype)
+
+            v[0, :] = r / rnorm
+            S = np.zeros(restart + 1, dtype=x.dtype)
+            S[0] = rnorm
+
+            for col in range(restart):
+                w = self.multiply_A(v[col, :])
+
+                # Modified Gram-Schmidt
+                for k in range(col + 1):
+                    h[k, col] = np.dot(v[k, :], w)
+                    w -= h[k, col] * v[k, :]
+
+                h[col + 1, col] = np.linalg.norm(w)
+                if h[col + 1, col] > eps:
+                    v[col + 1, :] = w / h[col + 1, col]
+
+                # Apply Givens rotations
+                for k in range(col):
+                    c, s = givens[k]
+                    temp = c * h[k, col] + s * h[k + 1, col]
+                    h[k + 1, col] = -s.conj() * h[k, col] + c * h[k + 1, col]
+                    h[k, col] = temp
+
+                # Generate and apply new Givens rotation
+                c, s, _ = lartg(h[col, col], h[col + 1, col])
+                givens[col] = [c, s]
+
+                h[col, col] = c * h[col, col] + s * h[col + 1, col]
+                h[col + 1, col] = 0
+
+                S[col + 1] = -np.conjugate(s) * S[col]
+                S[col] = c * S[col]
+
+                # Check for convergence
+                if abs(S[col + 1]) <= rtol * bnrm2 + atol:
+                    break
+
+            # Solve the least squares problem
+            y = np.linalg.lstsq(h[:col + 1, :col + 1], S[:col + 1], rcond=None)[0]
+            x += np.dot(v[:col + 1, :].T, y)
+
+        print(f"GMRES stopped after {max_iter} iterations with residual {rnorm}.")
+        return x, res
+
