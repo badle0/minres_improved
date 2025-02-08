@@ -123,14 +123,14 @@ if not args.skip_deepmr:
     print("DEEPMINRES is running...")
     t0 = time.time()
     max_mr_iter = 1000
-    x_sol, res_arr = MR.deepminres(b, np.zeros(b.shape), model_predict, max_mr_iter, tol, verbose_deepmr)
+    x_sol = MR.deepminres(b, np.zeros(b.shape), model_predict, max_mr_iter, tol, verbose_deepmr)
     time_cg_ml = time.time() - t0
     print("DEEPMINRES took ", time_cg_ml, " secs.")
     
 if not args.skip_mr:
     print("MINRES is running...")
     t0 = time.time()
-    x_sol_mr, res_arr_mr = MR.minres(b, np.zeros(b.shape), max_mr_iter, tol, True)
+    x_sol_mr = MR.minres(b, np.zeros(b.shape), max_mr_iter, tol, True)
     time_cg = time.time() - t0
     print("MINRES took ", time_cg, " secs")
 
@@ -142,7 +142,7 @@ if not args.skip_dpmr:
     def ic_precond(x):
         return M_inv.multiply_A(x)
 
-    x_sol_mr, res_arr_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
+    x_sol_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
     time_cg = time.time() - t0
     print("DiagonalPMR took ", time_cg, " secs")
 
@@ -158,7 +158,7 @@ if not args.skip_ilupmr:
 
     print("IncompleteLUPMR is running...")
     t0 = time.time()
-    x_sol_mr, res_arr_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
+    x_sol_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
     time_iLUmr = time.time() - t0
     print("IncompleteLUPMR took ", time_iLUmr, " secs")
 
@@ -188,6 +188,6 @@ if not args.skip_icpmr:
 
     print("IncompleteCholeskyPMR is running...")
     t0 = time.time()
-    x_sol_mr, res_arr_mr = MR2.pmr_normal(b2, np.zeros(b2.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
+    x_sol_mr = MR2.pmr_normal(b2, np.zeros(b2.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
     time_icpmr = time.time() - t0
     print("IncompleteChleskyPMR took ", time_icpmr, " secs")

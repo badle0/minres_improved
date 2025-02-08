@@ -5,7 +5,7 @@ from numpy import inner, zeros, inf, finfo
 from math import sqrt
 import scipy.sparse as sparse
 from scipy.linalg import get_lapack_funcs
-import scipy.sparse.linalg as spla
+from numpy.linalg import norm
 import tensorflow as tf
 
 
@@ -292,15 +292,17 @@ class MINRESSparse:
         Acond = 0
         rnorm = 0
         ynorm = 0
-
+        
         x = x0.copy()
+        xtype = x.dtype
+        eps = finfo(xtype).eps
         if x0 is None:
             r1 = b.copy()
         else:
             r1 = b - self.multiply_A(x0)
         y = r1
 
-        beta1 = self.dot(r1, y)
+        beta1 = inner(r1, y)
         if beta1 == 0:
             return x0, beta1
         
@@ -316,28 +318,27 @@ class MINRESSparse:
         rhs2 = 0
         tnorm2 = 0
         gmax = 0
-        gmin = np.finfo(float).max
+        gmin = finfo(xtype).max
         cs = -1
         sn = 0
-        w = np.zeros(n)
-        w2 = np.zeros(n)
+        w = zeros(n, dtype=xtype)
+        w2 = zeros(n, dtype=xtype)
         r2 = r1
 
-        res_arr = [beta1]
-
-        for itn in range(max_iter):
+        while itn < max_iter:
+            itn += 1
             s = 1.0/beta
             v = s*y
             y = self.multiply_A(v)
             if itn >= 2:
                 y = y - (beta / oldb) * r1
-            alpha = self.dot(v, y)
-            y = y - (alpha / beta) * r1
+            alpha = inner(v, y)
+            y = y - (alpha / beta) * r2
             r1 = r2
             r2 = y
             y = r2
             oldb = beta
-            beta = self.dot(r2, y)
+            beta = inner(r2, y)
             if beta < 0:
                 raise ValueError('non-symmetric matrix')
             beta = sqrt(beta)
@@ -350,7 +351,7 @@ class MINRESSparse:
             root = np.sqrt(gbar ** 2 + dbar ** 2)
             Arnorm = phibar * root
             gamma = np.sqrt(gbar ** 2 + beta ** 2)
-            gamma = max(gamma, np.finfo(float).eps)
+            gamma = max(gamma, eps)
             cs = gbar / gamma
             sn = beta / gamma
             phi = cs * phibar
@@ -367,8 +368,8 @@ class MINRESSparse:
             rhs2 = - epsln * z
             Anorm = np.sqrt(tnorm2)
             ynorm = self.norm(x)
-            epsa = Anorm * np.finfo(float).eps
-            epsx = Anorm * ynorm * np.finfo(float).eps
+            epsa = Anorm * eps
+            epsx = Anorm * eps
             epsr = Anorm * ynorm * tol
             diag = gbar
             if diag == 0:
@@ -404,19 +405,18 @@ class MINRESSparse:
                     istop = 1
             
             if verbose:
-                print(f"Iteration {itn+1}, test1: {test1}")
-                res_arr.append(rnorm)
+                print(f"Iteration {itn}, test1: {test1}")
 
             if istop != 0:
                 break
 
-        print("Traditional MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn+1:5g}')
+        print("Traditional MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn:5g}')
         print("Traditional MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
         print("Traditional MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
         print("Traditional MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
         print("Traditional MINRES stopped" + msg[istop])
 
-        return x, res_arr
+        return x
 
     def deepminres(self, b, x0, model_predict, max_iter=100, tol=1e-10, verbose=False):
         """
@@ -445,13 +445,16 @@ class MINRESSparse:
         Acond = 0
         rnorm = 0
         ynorm = 0
+       
         x = x0.copy()
+        xtype = x.dtype
+        eps = finfo(xtype).eps
         if x0 is None:
             r1 = b.copy()
         else:
             r1 = b - self.multiply_A(x0)
         y = r1
-        beta1 = self.dot(r1, y)
+        beta1 = inner(r1, y)
         if beta1 == 0:
             return x0, beta1
         oldb = 0
@@ -464,27 +467,27 @@ class MINRESSparse:
         rhs2 = 0
         tnorm2 = 0
         gmax = 0
-        gmin = np.finfo(float).max
+        gmin = finfo(xtype).max
         cs = -1
         sn = 0
-        w = np.zeros(n)
-        w2 = np.zeros(n)
+        w = zeros(n, dtype=xtype)
+        w2 = zeros(n, dtype=xtype)
         r2 = r1
-        res_arr = [beta1]
 
-        for itn in range(max_iter):
+        while itn < max_iter:
+            itn += 1
             # Use the model to predict the search direction
             v = model_predict(y)
             y = self.multiply_A(v)
             if itn >= 2:
                 y = y - (beta / oldb) * r1
-            alpha = self.dot(v, y)
-            y = y - (alpha / beta) * r1
+            alpha = inner(v, y)
+            y = y - (alpha / beta) * r2
             r1 = r2
             r2 = y
             y = r2
             oldb = beta
-            beta = self.dot(r2, y)
+            beta = inner(r2, y)
             if beta < 0:
                 raise ValueError('non-symmetric matrix')
             beta = sqrt(beta)
@@ -497,7 +500,7 @@ class MINRESSparse:
             root = np.sqrt(gbar ** 2 + dbar ** 2)
             Arnorm = phibar * root
             gamma = np.sqrt(gbar ** 2 + beta ** 2)
-            gamma = max(gamma, np.finfo(float).eps)
+            gamma = max(gamma, eps)
             cs = gbar / gamma
             sn = beta / gamma
             phi = cs * phibar
@@ -514,8 +517,8 @@ class MINRESSparse:
             rhs2 = - epsln * z
             Anorm = np.sqrt(tnorm2)
             ynorm = self.norm(x)
-            epsa = Anorm * np.finfo(float).eps
-            epsx = Anorm * ynorm * np.finfo(float).eps
+            epsa = Anorm * eps
+            epsx = Anorm * eps
             epsr = Anorm * ynorm * tol
             diag = gbar
             if diag == 0:
@@ -551,19 +554,18 @@ class MINRESSparse:
                     istop = 1
             
             if verbose:
-                print(f"Iteration {itn+1}, test1: {test1}")
-                res_arr.append(rnorm)
+                print(f"Iteration {itn}, test1: {test1}")
 
             if istop != 0:
                 break
 
-        print("Deep MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn+1:5g}')
+        print("Deep MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn:5g}')
         print("Deep MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
         print("Deep MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
         print("Deep MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
         print("Deep MINRES stopped" + msg[istop])
 
-        return x, res_arr
+        return x
 
     def create_diagonal_preconditioner(self):
         """
@@ -766,18 +768,22 @@ class MINRESSparse:
         Acond = 0
         rnorm = 0
         ynorm = 0
+        
         x = x0.copy()
+        xtype = x.dtype
+        eps = finfo(xtype).eps
         if x0 is None:
             r1 = b.copy()
         else:
             r1 = b - self.multiply_A(x0)
-        y = precond(r1)
-        beta1 = self.dot(r1, y)
-        if beta1 < 0:
-            raise ValueError('indefinite preconditioner')
-        elif beta1 == 0:
+        y = precond(r1) #apply preconditioner
+
+        beta1 = inner(r1, y)
+        if beta1 == 0:
             return x0, beta1
+        
         beta1 = np.sqrt(beta1)
+
         oldb = 0
         beta = beta1
         dbar = 0
@@ -788,30 +794,30 @@ class MINRESSparse:
         rhs2 = 0
         tnorm2 = 0
         gmax = 0
-        gmin = np.finfo(float).max
+        gmin = finfo(xtype).max
         cs = -1
         sn = 0
-        w = np.zeros(n)
-        w2 = np.zeros(n)
+        w = zeros(n, dtype=xtype)
+        w2 = zeros(n, dtype=xtype)
         r2 = r1
-        res_arr = [beta1]
 
-        for itn in range(max_iter):
+        while itn < max_iter:
+            itn += 1
             s = 1.0/beta
             v = s*y
             y = self.multiply_A(v)
             if itn >= 2:
                 y = y - (beta / oldb) * r1
-            alpha = self.dot(v, y)
-            y = y - (alpha / beta) * r1
+            alpha = inner(v, y)
+            y = y - (alpha / beta) * r2
             r1 = r2
             r2 = y
-            y = precond(r2)
+            y = precond(r2) # apply preconditioner
             oldb = beta
-            beta = self.dot(r2, y)
+            beta = inner(r2, y)
             if beta < 0:
                 raise ValueError('non-symmetric matrix')
-            beta = np.sqrt(beta)
+            beta = sqrt(beta)
             tnorm2 += alpha ** 2 + oldb ** 2 + beta ** 2
             oldeps = epsln
             delta = cs * dbar + sn * alpha
@@ -821,7 +827,7 @@ class MINRESSparse:
             root = np.sqrt(gbar ** 2 + dbar ** 2)
             Arnorm = phibar * root
             gamma = np.sqrt(gbar ** 2 + beta ** 2)
-            gamma = max(gamma, np.finfo(float).eps)
+            gamma = max(gamma, eps)
             cs = gbar / gamma
             sn = beta / gamma
             phi = cs * phibar
@@ -838,8 +844,8 @@ class MINRESSparse:
             rhs2 = - epsln * z
             Anorm = np.sqrt(tnorm2)
             ynorm = self.norm(x)
-            epsa = Anorm * np.finfo(float).eps
-            epsx = Anorm * ynorm * np.finfo(float).eps
+            epsa = Anorm * eps
+            epsx = Anorm * eps
             epsr = Anorm * ynorm * tol
             diag = gbar
             if diag == 0:
@@ -857,7 +863,7 @@ class MINRESSparse:
             Acond = gmax / gmin
 
             if istop == 0:
-                t1 = 1 + test1  
+                t1 = 1 + test1      # These tests work if rtol < eps
                 t2 = 1 + test2
                 if t2 <= 1:
                     istop = 2
@@ -875,19 +881,18 @@ class MINRESSparse:
                     istop = 1
             
             if verbose:
-                print(f"Iteration {itn+1}, test1: {test1}")
-                res_arr.append(rnorm)
+                print(f"Iteration {itn}, test1: {test1}")
 
             if istop != 0:
                 break
 
-        print("Preconditioned MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn+1:5g}')
-        print("Preconditioned MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
-        print("Preconditioned MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
-        print("Preconditioned MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
-        print("Preconditioned MINRES stopped" + msg[istop])
+        print("Traditional MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn:5g}')
+        print("Traditional MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
+        print("Traditional MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
+        print("Traditional MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
+        print("Traditional MINRES stopped" + msg[istop])
 
-        return x, res_arr
+        return x
 
     def create_ritz_vectors(self, b, num_vectors, sorting=True):
         """
