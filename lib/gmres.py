@@ -1,11 +1,6 @@
 import numpy as np
 from scipy.linalg import get_lapack_funcs
-import scipy.sparse as sparse
-import scipy.sparse.linalg as spla
-import tensorflow as tf
 
-
-# Solves non-symmetric and indefinite systems
 class GMRESSparse:
     def __init__(self, A_sparse):
         """
@@ -21,11 +16,7 @@ class GMRESSparse:
         A_sp = A_sparse.copy()
         self.A_sparse = A_sp.astype(np.float32)
 
-    def multiply_A(self,x):
-        #return np.matmul(self.A,x)
-        return self.A_sparse.dot(x)
-
-    def multiply_A_sparse(self, x):
+    def multiply_A(self, x):
         """
         Multiplies the sparse matrix A by vector x.
 
@@ -39,14 +30,14 @@ class GMRESSparse:
 
     def norm(self, x):
         """
-         Computes the norm of vector x.
+        Computes the norm of vector x.
 
-         Args:
-             x (np.array): The input vector.
+        Args:
+            x (np.array): The input vector.
 
-         Returns:
-             float: The norm of x.
-         """
+        Returns:
+            float: The norm of x.
+        """
         return np.linalg.norm(x)
 
     def dot(self, x, y):
@@ -62,150 +53,122 @@ class GMRESSparse:
         """
         return np.dot(x, y)
 
-    def multi_norm(self, xs):
-        """
-        Computes the norms of multiple vectors.
+    def gmres(self, b, x0=None, *, rtol=1e-5, atol=0., restart=None, maxiter=None, M=None,
+          callback=None, callback_type=None):
+        # Set default callback type if not provided
+        if callback_type is None:
+            callback_type = 'legacy'
 
-        Args:
-            xs (np.array): The input vectors.
+        # Validate callback type
+        if callback_type not in ('x', 'pr_norm', 'legacy'):
+            raise ValueError(f"Unknown callback_type: {callback_type!r}")
 
-        Returns:
-            np.array: The norms of the input vectors.
-        """
-        norms = np.zeros(xs.shape[0])
-        for i in range(xs.shape[0]):
-            norms[i] = self.norm(xs[i])
-        return norms
+        # Disable callback if none is provided
+        if callback is None:
+            callback_type = None
 
-    def multi_dot(self, xs, ys):
-        """
-        Computes the dot products of multiple pairs of vectors.
-
-        Args:
-            xs (np.array): The first set of vectors.
-            ys (np.array): The second set of vectors.
-
-        Returns:
-            np.array: The dot products of the input vector pairs.
-        """
-        dots = np.zeros(xs.shape[0])
-        for i in range(xs.shape[0]):
-            dots[i] = self.dot(xs[i], ys[i])
-        return dots
-
-    def get_zero_rows(self):
-        """
-        Gets the rows of the sparse matrix A that are entirely zero.
-
-        Returns:
-            np.array: The indices of the zero rows.
-        """
-        return np.where(self.A_sparse.getnnz(1) == 0)[0]
-
-
-    # HONGYI VERSION
-    def gmres_hongyi(self, b, x0, max_iter=100, rtol=1e-10, atol = 0., restart=None):
-        """
-        Solves the linear system Ax = b using the GMRES algorithm.
-
-        Args:
-            b (np.array): The right-hand side vector.
-            x0 (np.array): The initial guess for the solution.
-            tol (float): The tolerance for convergence.
-            max_iter (int): The maximum number of iterations.
-            restart (int): Number of iterations between restarts.
-
-        Returns:
-            tuple: The solution vector x and the array of residuals.
-        """
+        # Initialize variables
+        A = self.A_sparse
+        x = np.zeros_like(b) if x0 is None else x0.copy()
+        
+        # Define preconditioner solve function
+        psolve = lambda v: M @ v if M is not None else v
         n = len(b)
         bnrm2 = np.linalg.norm(b)
-        atol = max(float(atol), float(rtol) * float(bnrm2))
 
+        # If the norm of b is zero, return the initial guess
         if bnrm2 == 0:
-            return x0, 0
+            return x, 0
 
-        eps = np.finfo(x0.dtype.char).eps
+        # Machine precision and dot product function
+        eps = np.finfo(x.dtype.char).eps
+        dotprod = np.vdot if np.iscomplexobj(x) else np.dot
+
+        # Set default maximum iterations and restart value
+        if maxiter is None:
+            maxiter = n * 10
 
         if restart is None:
-            restart = 20
-        restart = min(restart, n)
-        x = x0.copy()
+            restart = min(20, n)
 
+        # Compute norm of preconditioned b
+        Mb_nrm2 = np.linalg.norm(psolve(b))
+        ptol_max_factor = 1.
+        ptol = Mb_nrm2 * min(ptol_max_factor, atol / bnrm2)
+        presid = 0.
+        
+        # Get LAPACK function for Givens rotations
         lartg = get_lapack_funcs('lartg', dtype=x.dtype)
-
-        #v = np.zeros((n, restart + 1))
-        #h = np.zeros((restart + 1, restart))
         v = np.empty([restart+1, n], dtype=x.dtype)
         h = np.zeros([restart, restart+1], dtype=x.dtype)
-        givens = np.zeros([restart, 2])
-        res = []
-
-        # legacy iteration count
+        givens = np.zeros([restart, 2], dtype=x.dtype)
+        
         inner_iter = 0
 
-        for it in range(max_iter):
-            if it == 0:
-                r = b - self.multiply_A(x) if x.any() else b.copy
-                rnorm_initial = self.norm(r)
-                if rnorm_initial < atol:
-                    res = res + [rnorm_initial]
-                    return x0, res
+        # Main GMRES iteration loop
+        for iteration in range(maxiter):
+            if iteration == 0:
+                r = b - (A @ x) if x.any() else b.copy()
+                if np.linalg.norm(r) < atol:
+                    return x, 0
 
-            v[0, :] = r #ERROR HERE: ValueError: could not broadcast input array from shape (8,) into shape (9,)
+            # Arnoldi process
+            v[0, :] = psolve(r)
             tmp = np.linalg.norm(v[0, :])
             v[0, :] *= (1 / tmp)
-            S = np.zeros(restart + 1)
+            S = np.zeros(restart+1, dtype=x.dtype)
             S[0] = tmp
+            breakdown = False
+            
+            for col in range(restart):
+                av = A @ v[col, :]
+                w = psolve(av)
+                h0 = np.linalg.norm(w)
+                for k in range(col+1):
+                    tmp = dotprod(v[k, :], w)
+                    h[col, k] = tmp
+                    w -= tmp * v[k, :]
 
-            for j in range(restart):
-                av = self.multiply_A(v[j, :])
-                w = av
+                h1 = np.linalg.norm(w)
+                h[col, col + 1] = h1
+                v[col + 1, :] = w[:]
 
-                # Modified Gram-Schmidt
-                h0 = self.norm(w)
-                for i in range(j + 1):
-                    tmp = self.dot(v[i, :], w)
-                    h[i, j] = tmp
-                    w -= tmp*v[i, :]
-
-                h1 = self.norm(w)
-                h[i, i + 1] = h1
-                v[i + 1, :] = w[:]
-
-                # Exact solution indicator
-                if h1 <= eps*h0:
-                    h[i, i+1] = 0
+                if h1 <= eps * h0:
+                    h[col, col + 1] = 0
+                    breakdown = True
                 else:
-                    v[i + 1, :] *= (1 / h1)
+                    v[col + 1, :] *= (1 / h1)
 
-                # apply past Givens rotations to current h column
-                for k in range(j):
+                # Apply Givens rotations
+                for k in range(col):
                     c, s = givens[k, 0], givens[k, 1]
-                    n0, n1 = h[j, [k, k + 1]]
-                    h[j, [k, k + 1]] = [c * n0 + s * n1, -s.conj() * n0 + c * n1]
+                    n0, n1 = h[col, [k, k+1]]
+                    h[col, [k, k + 1]] = [c*n0 + s*n1, -s.conj()*n0 + c*n1]
 
-                # get and apply current rotation to h and S
-                c, s, mag = lartg(h[j, j], h[j, j + 1])
-                givens[j, :] = [c, s]
-                h[j, [j, j + 1]] = mag, 0
-
-                # S[j+1] component is always 0
-                tmp = -np.conjugate(s) * S[j]
-                S[[j, j + 1]] = [c * S[j], tmp]
+                # Compute new Givens rotation
+                c, s, mag = lartg(h[col, col], h[col, col+1])
+                givens[col, :] = [c, s]
+                h[col, [col, col+1]] = mag, 0
+                tmp = -np.conjugate(s) * S[col]
+                S[[col, col + 1]] = [c * S[col], tmp]
                 presid = np.abs(tmp)
                 inner_iter += 1
 
-            # Solve h(j, j) upper triangular system and allow pseudo-solve
-            # singular cases as in (but without the f2py copies):
-            # y = trsv(h[:j+1, :j+1].T, S[:j+1])
+                # Call callback function if provided
+                if callback_type in ('legacy', 'pr_norm'):
+                    callback(presid / bnrm2)
+                if callback_type == 'legacy' and inner_iter == maxiter:
+                    break
+                if presid <= ptol or breakdown:
+                    break
 
-            if h[j, j] == 0:
-                S[j] = 0
+            if h[col, col] == 0:
+                S[col] = 0
 
-            y = np.zeros([j + 1], dtype=x.dtype)
-            y[:] = S[:j + 1]
-            for k in range(j, 0, -1):
+            # Solve the upper triangular system
+            y = np.zeros([col+1], dtype=x.dtype)
+            y[:] = S[:col+1]
+            for k in range(col, 0, -1):
                 if y[k] != 0:
                     y[k] /= h[k, k]
                     tmp = y[k]
@@ -213,102 +176,13 @@ class GMRESSparse:
             if y[0] != 0:
                 y[0] /= h[0, 0]
 
-            x += self.dot(v[:j + 1, :], y)
+            # Update the solution
+            x += y @ v[:col+1, :]
 
-            r = b - self.multiply_A(x)
-            rnorm = self.norm(r)
-            res.append(rnorm)
-            if rnorm <= atol:
-                print(f"GMRES converged in {it + 1} iterations with residual {rnorm}.")
-                return x, res
-
-        print(f"GMRES stopped after {max_iter} iterations with residual {rnorm}.")
-        return x, res
-    
-    # GMRES algorithm from SCIPY modified with ChatGPT to be cleaner and mirror minres algorithm 
-    def gmres(self, b, x0, max_iter=100, rtol=1e-10, atol=0.0, restart=None):
-        """
-        Solves the linear system Ax = b using the GMRES algorithm.
-
-        Args:
-            b (np.array): The right-hand side vector.
-            x0 (np.array): The initial guess for the solution.
-            rtol (float): The relative tolerance for convergence.
-            atol (float): The absolute tolerance for convergence.
-            max_iter (int): The maximum number of iterations.
-            restart (int): Number of iterations between restarts.
-
-        Returns:
-            tuple: The solution vector x and the array of residuals.
-        """
-        n = len(b)
-        bnrm2 = np.linalg.norm(b)
-        atol = max(float(atol), float(rtol) * float(bnrm2))
-        if bnrm2 == 0:
-            return x0, [0]
-
-        eps = np.finfo(x0.dtype).eps
-        if restart is None:
-            restart = min(20, n)
-
-        x = x0.copy()
-        lartg = get_lapack_funcs('lartg', dtype=x.dtype)
-
-        res = []
-        for iteration in range(max_iter):
-            r = b - self.multiply_A(x)
+            # Compute the residual
+            r = b - (A @ x)
             rnorm = np.linalg.norm(r)
-            res.append(rnorm)
+            if rnorm < atol or rnorm / bnrm2 < rtol:
+                return x, iteration + inner_iter + 1
 
-            if rnorm <= rtol * bnrm2 + atol:
-                print(f"GMRES converged in {iteration + 1} iterations with residual {rnorm}.")
-                return x, res
-
-            v = np.zeros((restart + 1, n), dtype=x.dtype)
-            h = np.zeros((restart + 1, restart), dtype=x.dtype)
-            givens = np.zeros((restart, 2), dtype=x.dtype)
-
-            v[0, :] = r / rnorm
-            S = np.zeros(restart + 1, dtype=x.dtype)
-            S[0] = rnorm
-
-            for col in range(restart):
-                w = self.multiply_A(v[col, :])
-
-                # Modified Gram-Schmidt
-                for k in range(col + 1):
-                    h[k, col] = np.dot(v[k, :], w)
-                    w -= h[k, col] * v[k, :]
-
-                h[col + 1, col] = np.linalg.norm(w)
-                if h[col + 1, col] > eps:
-                    v[col + 1, :] = w / h[col + 1, col]
-
-                # Apply Givens rotations
-                for k in range(col):
-                    c, s = givens[k]
-                    temp = c * h[k, col] + s * h[k + 1, col]
-                    h[k + 1, col] = -s.conj() * h[k, col] + c * h[k + 1, col]
-                    h[k, col] = temp
-
-                # Generate and apply new Givens rotation
-                c, s, _ = lartg(h[col, col], h[col + 1, col])
-                givens[col] = [c, s]
-
-                h[col, col] = c * h[col, col] + s * h[col + 1, col]
-                h[col + 1, col] = 0
-
-                S[col + 1] = -np.conjugate(s) * S[col]
-                S[col] = c * S[col]
-
-                # Check for convergence
-                if abs(S[col + 1]) <= rtol * bnrm2 + atol:
-                    break
-
-            # Solve the least squares problem
-            y = np.linalg.lstsq(h[:col + 1, :col + 1], S[:col + 1], rcond=None)[0]
-            x += np.dot(v[:col + 1, :].T, y)
-
-        print(f"GMRES stopped after {max_iter} iterations with residual {rnorm}.")
-        return x, res
-
+        return x, iteration + inner_iter + 1
