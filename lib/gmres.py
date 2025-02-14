@@ -53,6 +53,7 @@ class GMRESSparse:
         """
         return np.dot(x, y)
 
+    # Based off of SciPy's GMRES implementation (v1.15.1)
     def gmres(self, b, x0=None, *, rtol=1e-5, atol=0., restart=None, maxiter=None, M=None,
           callback=None, callback_type=None):
         # Set default callback type if not provided

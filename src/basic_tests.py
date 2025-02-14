@@ -23,22 +23,6 @@ import helper_functions as hf
 
 
 def random_tridiagonal_matrix(n, seed=42):
-    """
-    Generates an n x n tridiagonal matrix in CSR format, where
-    the main diagonal and off-diagonals contain random values in [0,1].
-
-    Parameters:
-    -----------
-    n : int
-        Size of the matrix (n x n).
-    seed : int, optional
-        Random seed for reproducibility. Default is 42.
-
-    Returns:
-    --------
-    A : scipy.sparse.csr_matrix
-        The resulting tridiagonal matrix.
-    """
     np.random.seed(seed)
     main_diag = np.random.rand(n)
     off_diag = np.random.rand(n - 1)
@@ -54,16 +38,6 @@ def random_tridiagonal_matrix(n, seed=42):
 
 
 def spaugment(A, c):
-    """
-    Constructs a sparse augmented matrix S from matrix A and scalar c.
-
-    Parameters:
-        A (scipy.sparse.csr_matrix): Input matrix of size n x n.
-        c (float): Scalar to multiply with the identity matrix.
-
-    Returns:
-        scipy.sparse.csr_matrix: Augmented matrix S of size (n + n) x (n + n).
-    """
     n, m = A.shape
     I = sp.identity(n, format='csr')
     Z = sp.csr_matrix((n, n))
@@ -72,37 +46,31 @@ def spaugment(A, c):
     S = sp.vstack([top, bottom])
     return S
 
-
+# Generate a sparse, indefinite, nonsymmetric matrix(size, seed=42)
 def generate_indefinite_nonsymmetric_matrix(size, density=0.05, seed=42):
-    """
-    Generates an indefinite, nonsymmetric sparse matrix in CSR format.
-
-    Parameters:
-    -----------
-    size : int
-        Size of the matrix (size x size).
-    density : float
-        Density of the non-zero elements (between 0 and 1).
-    seed : int, optional
-        Random seed for reproducibility. Default is 42.
-
-    Returns:
-    --------
-    A : scipy.sparse.csr_matrix
-        The resulting indefinite, nonsymmetric sparse matrix.
-    """
     np.random.seed(seed)
+    
+    # Step 1: Generate a sparse random matrix (nonsymmetric)
     A = sp.random(size, size, density=density, format='csr', data_rvs=np.random.rand)
-    A = A - sp.diags(A.diagonal())
-    eigenvalues, _ = eigs(A, k=2, which='LR')
-    iteration = 0
-    while not (np.any(eigenvalues.real > 0) and np.any(eigenvalues.real < 0)) and iteration < 10:
-        perturb_indices = np.random.choice(size * size, size, replace=False)
-        perturb_data = np.random.rand(size) - 0.5
-        perturb_matrix = sp.csr_matrix((perturb_data, (perturb_indices // size, perturb_indices % size)), shape=(size, size))
-        A += perturb_matrix
-        eigenvalues, _ = eigs(A, k=2, which='LR')
-        iteration += 1
+    
+    # Step 2: Generate a random skew-symmetric matrix by creating a matrix and subtracting its transpose
+    skew_symmetric = sp.random(size, size, density=density, format='csr', data_rvs=np.random.rand)
+    skew_symmetric = skew_symmetric - skew_symmetric.T  # make it skew-symmetric
+    
+    # Step 3: Combine the nonsymmetric matrix and skew-symmetric part
+    A = A + skew_symmetric  # Adding skew-symmetric matrix makes it nonsymmetric
+    
+    # Step 4: Convert to LIL format for efficient diagonal modification
+    A = A.tolil()  # Convert to LIL format
+    
+    # Step 5: Add negative diagonal entries to ensure indefiniteness
+    diag_vals = np.random.uniform(-1, 1, size)
+    for i in range(size):
+        A[i, i] = diag_vals[i]  # Set diagonal values directly
+    
+    # Step 6: Convert back to CSR format for efficient arithmetic
+    A = A.tocsr()
+    
     return A
 
 
@@ -111,40 +79,58 @@ def identity_matrix_test(dim):
     A = np.eye(dim)
     b = np.arange(dim)
     print("A=\n", A)
+    print("Condition number of A:", np.linalg.cond(A))
     print("b=", b)
 
     print("\nSCIPY MINRES")
-    x_sol_mres, exitCode = sp.linalg.minres(A, b)
+    start_time = time.time()
+    x_sol_mres, exitCode = sp.linalg.minres(A, b,show=True)
+    end_time = time.time()
     print('exitcode=', exitCode)
     print("x=", x_sol_mres)
+    print("Time taken:", end_time - start_time, "seconds")
     
     print("\nCUSTOM MINRES")
     MR = MINRESSparse(A)
-    x_sol_mr, res_arr_mr = MR.minres(b, np.ones(b.shape))
+    start_time = time.time()
+    x_sol_mr = MR.minres(b, np.ones(b.shape))
+    end_time = time.time()
     print("x_sol_mr=", x_sol_mr)
-    print("res_arr_mr=", res_arr_mr, "\n")
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nSCIPY GMRES")
+    start_time = time.time()
     x_sol_gmres, exitCode = sp.linalg.gmres(A, b)
+    end_time = time.time()
     print("exitcode=", exitCode)
     print("x_sol_gmres=", x_sol_gmres)
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM GMRES")
     GM = GMRESSparse(A)
+    start_time = time.time()
     x_sol_gm, res_arr_gm = GM.gmres(b, np.ones(dim))
+    end_time = time.time()
     print("x_sol_gm=", x_sol_gm)
-    print("res_arr_gm=", res_arr_gm, "\n")
+    print("res_arr_gm=", res_arr_gm)
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nSCIPY BiCGSTAB")
+    start_time = time.time()
     x_sol_bicgstab, exitCode = sp.linalg.bicgstab(A, b)
+    end_time = time.time()
     print("exitcode=", exitCode)
     print("x_sol_bicgstab=", x_sol_bicgstab)
+    print("Time taken:", end_time - start_time, "seconds")
     
     print("\nCUSTOM BiCGSTAB")
     bicgstab = BiCGSTABSparse(A)
+    start_time = time.time()
     x_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(b, np.ones(dim))
+    end_time = time.time()
     print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("res_arr_bicgstab=", res_arr_bicgstab, "\n")
+    print("res_arr_bicgstab=", res_arr_bicgstab)
+    print("Time taken:", end_time - start_time, "seconds\n")
 
 
 def symmetric_positive_definite_test(dim):
@@ -154,46 +140,64 @@ def symmetric_positive_definite_test(dim):
     A = np.dot(A, A.T) + dim * np.eye(dim)
     b = np.arange(dim)
     print("A=\n", pd.DataFrame(A))
+    print("Condition number of A:", np.linalg.cond(A))
     print("b=", b)
 
     print("\nSCIPY MINRES")
-    x_sol_mres, exitCode = sp.linalg.minres(A, b)
+    start_time = time.time()
+    x_sol_mres, exitCode = sp.linalg.minres(A, b, show=True)
+    end_time = time.time()
     print('exitcode=', exitCode)
     print("x=", x_sol_mres)
     print("Ax=", A.dot(x_sol_mres))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM MINRES")
     MR = MINRESSparse(A)
-    x_sol_mr, res_arr_mr = MR.minres(b, np.ones(b.shape))
+    start_time = time.time()
+    x_sol_mr = MR.minres(b, np.ones(b.shape))
+    end_time = time.time()
     print("x_sol_mr=", x_sol_mr)
-    print("res_arr_mr=", res_arr_mr)
     print("Ax=", A.dot(x_sol_mr))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nSCIPY GMRES")
+    start_time = time.time()
     x_sol_gmres, exitCode = sp.linalg.gmres(A, b)
+    end_time = time.time()
     print('exitcode=', exitCode)
     print("x=", x_sol_gmres)
     print("Ax=", A.dot(x_sol_gmres))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM GMRES")
     GM = GMRESSparse(A)
+    start_time = time.time()
     x_sol_gm, res_arr_gm = GM.gmres(b, np.ones(dim))
+    end_time = time.time()
     print("x=", x_sol_gm)
     print("res_arr_gm=", res_arr_gm)
     print("Ax=", A.dot(x_sol_gm))
+    print("Time taken:", end_time - start_time, "seconds")
     
     print("\nSCIPY BiCGSTAB")
+    start_time = time.time()
     x_sol_bicgstab, exitCode = sp.linalg.bicgstab(A, b)
+    end_time = time.time()
     print("exitcode=", exitCode)
     print("x_sol_bicgstab=", x_sol_bicgstab)
     print("Ax=", A.dot(x_sol_bicgstab))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM BiCGSTAB")
     bicgstab = BiCGSTABSparse(A)
+    start_time = time.time()
     x_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(b, np.ones(dim))
+    end_time = time.time()
     print("x_sol_bicgstab=", x_sol_bicgstab)
     print("res_arr_bicgstab=", res_arr_bicgstab)
     print("Ax=", A.dot(x_sol_bicgstab))
+    print("Time taken:", end_time - start_time, "seconds")
 
 
 def symmetric_indefinite_test(dim):
@@ -204,46 +208,64 @@ def symmetric_indefinite_test(dim):
     d = np.append(b, np.zeros(dim))
     print("SOLVING Sy=d for spaugmented system...")
     print("S=\n", pd.DataFrame(S.toarray()))
+    print("Condition number of S:", np.linalg.cond(S.toarray()))
     print("d=", d)
 
     print("\nSCIPY MINRES")
-    y_sol_mres, exitCode = sp.linalg.minres(S, d)
+    start_time = time.time()
+    y_sol_mres, exitCode = sp.linalg.minres(S, d, show=True)
+    end_time = time.time()
     print('exitcode=', exitCode)
     print("y=", y_sol_mres)
     print("Sy=", S.dot(y_sol_mres))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM MINRES")
     MR = MINRESSparse(S)
-    y_sol_mr, res_arr_mr = MR.minres(d, np.ones(d.shape))
+    start_time = time.time()
+    y_sol_mr = MR.minres(d, np.ones(d.shape))
+    end_time = time.time()
     print("y_sol_mr=", y_sol_mr)
-    print("res_arr_mr=", res_arr_mr)
     print("Sy=", S.dot(y_sol_mr))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nSCIPY GMRES")
+    start_time = time.time()
     y_sol_gmres, exitCode = sp.linalg.gmres(S, d)
+    end_time = time.time()
     print('exitcode=', exitCode)
     print("y=", y_sol_gmres)
     print("Sy=", S.dot(y_sol_gmres))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM GMRES")
     GM = GMRESSparse(S)
+    start_time = time.time()
     y_sol_gmres, res_arr_gm = GM.gmres(d, np.ones(dim * 2))
+    end_time = time.time()
     print("y=", y_sol_gmres)
     print("res_arr_gm=", res_arr_gm)
     print("Sy=", S.dot(y_sol_gmres))
+    print("Time taken:", end_time - start_time, "seconds")
     
     print("\nSCIPY BiCGSTAB")
+    start_time = time.time()
     y_sol_bicgstab, exitCode = sp.linalg.bicgstab(S, d, np.ones(dim * 2))
+    end_time = time.time()
     print("exitcode=", exitCode)
     print("y_sol_bicgstab=", y_sol_bicgstab)
     print("Sy=", S.dot(y_sol_bicgstab))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM BiCGSTAB")
     bicgstab = BiCGSTABSparse(S)
+    start_time = time.time()
     y_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(d, np.ones(dim * 2))
+    end_time = time.time()
     print("y_sol_bicgstab=", y_sol_bicgstab)
     print("res_arr_bicgstab=", res_arr_bicgstab)
     print("Sy=", S.dot(y_sol_bicgstab))
+    print("Time taken:", end_time - start_time, "seconds")
 
 
 def nonsymmetric_indefinite_test(dim):
@@ -251,46 +273,46 @@ def nonsymmetric_indefinite_test(dim):
     A = generate_indefinite_nonsymmetric_matrix(dim)
     b = np.arange(dim)
     print("A=\n", pd.DataFrame(A.toarray()))
+    print("Condition number of A:", np.linalg.cond(A.toarray()))
     print("b=", b)
 
-    # print("\nSCIPY MINRES (should FAIL)")
-    # x_sol_mres, exitCode = sp.linalg.minres(A, b)
-    # print('exitcode=', exitCode)
-    # print("x=", x_sol_mres)
-    # print("Ax=", A.dot(x_sol_mres))
-
-    # print("\nCUSTOM MINRES (should FAIL)")
-    # MR = MINRESSparse(A)
-    # x_sol_mr, res_arr_mr = MR.minres(b, np.ones(b.shape))
-    # print("x_sol_mr=", x_sol_mr)
-    # print("res_arr_mr=", res_arr_mr)
-    # print("Ax=", A.dot(x_sol_mr))
-
     print("\nSCIPY GMRES")
+    start_time = time.time()
     x_sol_gmres, exitCode = sp.linalg.gmres(A, b)
+    end_time = time.time()
     print('exitcode=', exitCode)
     print("x=", x_sol_gmres)
     print("Ax=", A.dot(x_sol_gmres))
+    print("Time taken:", end_time - start_time, "seconds")
 
     print("\nCUSTOM GMRES")
     GM = GMRESSparse(A)
+    start_time = time.time()
     x_sol_gmres, res_arr_gm = GM.gmres(b, np.ones(dim))
+    end_time = time.time()
     print("x=", x_sol_gmres)
     print("res_arr_gm=", res_arr_gm)
     print("Ax=", A.dot(x_sol_gmres))
+    print("Time taken:", end_time - start_time, "seconds")
     
     print("\nSCIPY BiCGSTAB")
+    start_time = time.time()
     x_sol_bicgstab, exitCode = sp.linalg.bicgstab(A, b, np.ones(dim))
+    end_time = time.time()
     print("exitcode=", exitCode)
     print("x_sol_bicgstab=", x_sol_bicgstab)
     print("Ax=", A.dot(x_sol_bicgstab))
+    print("Time taken:", end_time - start_time, "seconds")
     
     print("\nCUSTOM BiCGSTAB")
     bicgstab = BiCGSTABSparse(A)
+    start_time = time.time()
     x_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(b, np.ones(dim))
+    end_time = time.time()
     print("x_sol_bicgstab=", x_sol_bicgstab)
     print("res_arr_bicgstab=", res_arr_bicgstab)
     print("Ax=", A.dot(x_sol_bicgstab))
+    print("Time taken:", end_time - start_time, "seconds")
 
 def main(dim):
     print("--== BEGINNING TESTING ==--\n")
@@ -300,7 +322,10 @@ def main(dim):
     nonsymmetric_indefinite_test(dim)
 
 if __name__ == "__main__":
-    main(8)
+    main(23) # 4 < dim < 24
+             # at dim=25, custom bicgstab works, but not scipy.
+             # at dim=24, scipy and custom bicgstab work. Both GMRES
+             # 
     
 # do diagonal preconditioners. incomplete LU
 # should not take more than one iteration for GMRES to converge with Identity matrix
