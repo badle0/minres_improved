@@ -106,7 +106,7 @@ class BiCGSTABSparse:
         """
         return np.where(self.A_sparse.getnnz(1) == 0)[0]
         
-    def bicgstab(self, b, x0, max_iter=1000, rtol=1e-10, atol=0.0):
+    def bicgstab_old(self, b, x0, max_iter=1000, rtol=1e-10, atol=0.0):
         """
         Solves the linear system Ax = b using the BiConjugate Gradient Stabilized (BiCGSTAB) method.
 
@@ -181,7 +181,7 @@ class BiCGSTABSparse:
     
     
     
-    def bicgstab_sp(self, b, x0=None, *, rtol=1e-5, atol=0., maxiter=None, M=None,
+    def bicgstab(self, b, x0=None, *, rtol=1e-5, atol=0., maxiter=None, M=None,
              callback=None):
         """Use BIConjugate Gradient STABilized iteration to solve ``Ax = b``.
 
@@ -251,10 +251,11 @@ class BiCGSTABSparse:
         >>> np.allclose(A.dot(x), b)
         True
         """
+        # Prepare the system for solving
         A, M, x, b, postprocess = make_system(self.A_sparse, M, x0, b) 
         bnrm2 = np.linalg.norm(b)
 
-        # Returned from SciPy's _get_atol function
+        # Calculate the absolute tolerance
         atol = max(float(atol), float(rtol) * float(bnrm2))
         
         if bnrm2 == 0:
@@ -270,37 +271,42 @@ class BiCGSTABSparse:
         matvec = A.matvec
         psolve = M.matvec
 
-        # These values make no sense but coming from original Fortran code
-        # sqrt might have been meant instead.
+        # Tolerance values for breakdown checks
         rhotol = np.finfo(x.dtype.char).eps**2
         omegatol = rhotol
 
-        # Dummy values to initialize vars, silence linter warnings
+        # Dummy values to initialize variables
         rho_prev, omega, alpha, p, v = None, None, None, None, None
 
+        # Initial residual
         r = b - matvec(x) if x.any() else b.copy()
         rtilde = r.copy()
 
         for iteration in range(maxiter):
-            if np.linalg.norm(r) < atol:  # Are we done?
+            # Check for convergence
+            if np.linalg.norm(r) < atol:
+                print(f"Converged in {iteration + 1} iterations")
                 return postprocess(x), 0
 
+            # Compute rho
             rho = dotprod(rtilde, r)
-            if np.abs(rho) < rhotol:  # rho breakdown
+            if np.abs(rho) < rhotol:  # Check for rho breakdown
                 return postprocess(x), -10
 
             if iteration > 0:
-                if np.abs(omega) < omegatol:  # omega breakdown
+                if np.abs(omega) < omegatol:  # Check for omega breakdown
                     return postprocess(x), -11
 
+                # Update beta and p
                 beta = (rho / rho_prev) * (alpha / omega)
                 p -= omega*v
                 p *= beta
                 p += r
-            else:  # First spin
+            else:  # First iteration
                 s = np.empty_like(r)
                 p = r.copy()
 
+            # Apply preconditioner
             phat = psolve(p)
             v = matvec(phat)
             rv = dotprod(rtilde, v)
@@ -310,10 +316,13 @@ class BiCGSTABSparse:
             r -= alpha*v
             s[:] = r[:]
 
+            # Check for convergence
             if np.linalg.norm(s) < atol:
                 x += alpha*phat
+                print(f"Converged in {iteration + 1} iterations")
                 return postprocess(x), 0
 
+            # Apply preconditioner to s
             shat = psolve(s)
             t = matvec(shat)
             omega = dotprod(t, s) / dotprod(t, t)
@@ -327,6 +336,7 @@ class BiCGSTABSparse:
 
         else:  # for loop exhausted
             # Return incomplete progress
+            print(f"Did not converge within the maximum number of iterations: {maxiter}")
             return postprocess(x), maxiter
 
                 

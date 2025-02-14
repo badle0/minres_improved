@@ -56,7 +56,7 @@ class GMRESSparse:
         return np.dot(x, y)
 
     # Based off of SciPy's GMRES implementation (v1.15.1)
-    def gmres(self, b, x0=None, *, rtol=1e-5, atol=0., restart=None, maxiter=None, M=None,
+    def gmres_old(self, b, x0=None, *, rtol=1e-5, atol=0., restart=None, maxiter=None, M=None,
           callback=None, callback_type=None):
         # Set default callback type if not provided
         if callback_type is None:
@@ -191,7 +191,7 @@ class GMRESSparse:
         return x, iteration + inner_iter + 1
     
     
-    def gmres_sp(self, b, x0=None, *, rtol=1e-5, atol=0., restart=None, maxiter=None, M=None,
+    def gmres(self, b, x0=None, *, rtol=1e-5, atol=0., restart=None, maxiter=None, M=None,
           callback=None, callback_type=None):
         """
         Use Generalized Minimal RESidual iteration to solve ``Ax = b``.
@@ -301,12 +301,14 @@ class GMRESSparse:
         if callback is None:
             callback_type = None
 
+        # Prepare the system for solving
         A, M, x, b, postprocess = make_system(self.A_sparse, M, x0, b)
         matvec = A.matvec
         psolve = M.matvec
         n = len(b)
         bnrm2 = np.linalg.norm(b)
 
+        # Calculate the absolute tolerance
         atol = max(float(atol), float(rtol) * float(bnrm2))
 
         if bnrm2 == 0:
@@ -325,32 +327,28 @@ class GMRESSparse:
 
         Mb_nrm2 = np.linalg.norm(psolve(b))
 
-        # ====================================================
-        # =========== Tolerance control from gh-8400 =========
-        # ====================================================
-        # Tolerance passed to GMRESREVCOM applies to the inner
-        # iteration and deals with the left-preconditioned
-        # residual.
+        # Tolerance control for the inner iteration
         ptol_max_factor = 1.
         ptol = Mb_nrm2 * min(ptol_max_factor, atol / bnrm2)
         presid = 0.
-        # ====================================================
+
         lartg = get_lapack_funcs('lartg', dtype=x.dtype)
 
-        # allocate internal variables
+        # Allocate internal variables
         v = np.empty([restart+1, n], dtype=x.dtype)
         h = np.zeros([restart, restart+1], dtype=x.dtype)
         givens = np.zeros([restart, 2], dtype=x.dtype)
 
-        # legacy iteration count
+        # Legacy iteration count
         inner_iter = 0
 
         for iteration in range(maxiter):
             if iteration == 0:
                 r = b - matvec(x) if x.any() else b.copy()
-                if np.linalg.norm(r) < atol:  # Are we done?
+                if np.linalg.norm(r) < atol:  # Check for convergence
                     return postprocess(x), 0
 
+            # Apply preconditioner to the residual
             v[0, :] = psolve(r)
             tmp = np.linalg.norm(v[0, :])
             v[0, :] *= (1 / tmp)
@@ -363,7 +361,7 @@ class GMRESSparse:
                 av = matvec(v[col, :])
                 w = psolve(av)
 
-                # Modified Gram-Schmidt
+                # Modified Gram-Schmidt orthogonalization
                 h0 = np.linalg.norm(w)
                 for k in range(col+1):
                     tmp = dotprod(v[k, :], w)
@@ -374,25 +372,26 @@ class GMRESSparse:
                 h[col, col + 1] = h1
                 v[col + 1, :] = w[:]
 
-                # Exact solution indicator
+                # Check for exact solution
                 if h1 <= eps*h0:
                     h[col, col + 1] = 0
                     breakdown = True
+                    print('BREAKDOWN OCCURRED')
                 else:
                     v[col + 1, :] *= (1 / h1)
 
-                # apply past Givens rotations to current h column
+                # Apply past Givens rotations to current h column
                 for k in range(col):
                     c, s = givens[k, 0], givens[k, 1]
                     n0, n1 = h[col, [k, k+1]]
                     h[col, [k, k + 1]] = [c*n0 + s*n1, -s.conj()*n0 + c*n1]
 
-                # get and apply current rotation to h and S
+                # Get and apply current rotation to h and S
                 c, s, mag = lartg(h[col, col], h[col, col+1])
                 givens[col, :] = [c, s]
                 h[col, [col, col+1]] = mag, 0
 
-                # S[col+1] component is always 0
+                # Update the RHS of the Hessenberg problem
                 tmp = -np.conjugate(s)*S[col]
                 S[[col, col + 1]] = [c*S[col], tmp]
                 presid = np.abs(tmp)
@@ -406,10 +405,7 @@ class GMRESSparse:
                 if presid <= ptol or breakdown:
                     break
 
-            # Solve h(col, col) upper triangular system and allow pseudo-solve
-            # singular cases as in (but without the f2py copies):
-            # y = trsv(h[:col+1, :col+1].T, S[:col+1])
-
+            # Solve the upper triangular system
             if h[col, col] == 0:
                 S[col] = 0
 
@@ -423,8 +419,10 @@ class GMRESSparse:
             if y[0] != 0:
                 y[0] /= h[0, 0]
 
+            # Update the solution
             x += y @ v[:col+1, :]
 
+            # Compute the new residual
             r = b - matvec(x)
             rnorm = np.linalg.norm(r)
 
@@ -450,4 +448,8 @@ class GMRESSparse:
             ptol = presid * min(ptol_max_factor, atol / rnorm)
 
         info = 0 if (rnorm <= atol) else maxiter
+        if info == 0:
+            print(f"Converged in {iteration + 1} iterations")
+        else:
+            print(f"Did not converge within the maximum number of iterations: {maxiter}")
         return postprocess(x), info
