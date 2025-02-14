@@ -1,6 +1,3 @@
-# basic_tests.py: Create different systems (SPD, nonsymmetric indefinite, etc.)
-# and test various iterative linear solvers: custom/scipy minres/BiCGSTAB/gmres.
-
 import sys
 import os
 import numpy as np
@@ -21,7 +18,6 @@ from gmres import GMRESSparse
 from bicgstab import BiCGSTABSparse
 import helper_functions as hf
 
-
 def random_tridiagonal_matrix(n, seed=42):
     np.random.seed(seed)
     main_diag = np.random.rand(n)
@@ -35,7 +31,6 @@ def random_tridiagonal_matrix(n, seed=42):
     eigenvalues, _ = eigsh(A, k=1, which='LM')
     A_normalized = A / np.abs(eigenvalues[0])
     return A_normalized
-
 
 def spaugment(A, c):
     n, m = A.shape
@@ -74,136 +69,109 @@ def generate_indefinite_nonsymmetric_matrix(size, density=0.05, seed=42):
     return A
 
 
+# Different preconditioners
+def no_preconditioner(A):
+    return sp.linalg.LinearOperator(A.shape, matvec=lambda x: x)
+
+def diagonal_preconditioner(A):
+    M_inv = 1.0 / A.diagonal()
+    return sp.linalg.LinearOperator(A.shape, matvec=lambda x: M_inv * x)
+
+def ilu_preconditioner(A):
+    try:
+        ilu = sp.linalg.spilu(A)
+        return sp.linalg.LinearOperator(A.shape, matvec=ilu.solve)
+    except RuntimeError:
+        print("ILU preconditioning failed, using no preconditioner.")
+        return no_preconditioner(A)
+
+def print_solver_results(solver_name, solver_func, A, b, preconditioner=None, custom_solver=False, method_name=None):
+    print(f"\n{solver_name}")
+    start_time = time.time()
+    try:
+        x0 = np.zeros_like(b, dtype=np.float64)
+        b = b.astype(np.float64)
+        if custom_solver:
+            solver = solver_func(A)
+            if preconditioner:
+                result = getattr(solver, method_name)(b, x0=x0, M=preconditioner)
+            else:
+                result = getattr(solver, method_name)(b, x0=x0)
+        else:
+            if preconditioner:
+                result = solver_func(A, b, x0=x0, M=preconditioner)
+            else:
+                result = solver_func(A, b, x0=x0)
+        
+        # Check if the result is a tuple (x, exitcode) or just x
+        if isinstance(result, tuple):
+            x, exitcode = result
+        else:
+            x = result
+            exitcode = None
+    except Exception as e:
+        print(f"Solver {solver_name} failed with exception: {e}")
+        return
+
+    end_time = time.time()
+    print("exitcode=", exitcode)
+    print("x=", x)
+    print("Ax=", A.dot(x))
+    print("Time taken:", end_time - start_time, "seconds")
+
 def identity_matrix_test(dim):
     print("IDENTITY MATRIX")
     A = np.eye(dim)
-    b = np.arange(dim)
+    b = np.arange(dim, dtype=np.float64)
     print("A=\n", A)
     print("Condition number of A:", np.linalg.cond(A))
     print("b=", b)
 
-    print("\nSCIPY MINRES")
-    start_time = time.time()
-    x_sol_mres, exitCode = sp.linalg.minres(A, b,show=True)
-    end_time = time.time()
-    print('exitcode=', exitCode)
-    print("x=", x_sol_mres)
-    print("Time taken:", end_time - start_time, "seconds")
-    
-    print("\nCUSTOM MINRES")
-    MR = MINRESSparse(A)
-    start_time = time.time()
-    x_sol_mr = MR.minres(b, np.ones(b.shape))
-    end_time = time.time()
-    print("x_sol_mr=", x_sol_mr)
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nSCIPY GMRES")
-    start_time = time.time()
-    x_sol_gmres, exitCode = sp.linalg.gmres(A, b)
-    end_time = time.time()
-    print("exitcode=", exitCode)
-    print("x_sol_gmres=", x_sol_gmres)
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM GMRES")
-    GM = GMRESSparse(A)
-    start_time = time.time()
-    x_sol_gm, res_arr_gm = GM.gmres(b, np.ones(dim))
-    end_time = time.time()
-    print("x_sol_gm=", x_sol_gm)
-    print("res_arr_gm=", res_arr_gm)
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nSCIPY BiCGSTAB")
-    start_time = time.time()
-    x_sol_bicgstab, exitCode = sp.linalg.bicgstab(A, b)
-    end_time = time.time()
-    print("exitcode=", exitCode)
-    print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("Time taken:", end_time - start_time, "seconds")
-    
-    print("\nCUSTOM BiCGSTAB")
-    bicgstab = BiCGSTABSparse(A)
-    start_time = time.time()
-    x_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(b, np.ones(dim))
-    end_time = time.time()
-    print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("res_arr_bicgstab=", res_arr_bicgstab)
-    print("Time taken:", end_time - start_time, "seconds\n")
-
+    print_solver_results("SCIPY MINRES", sp.linalg.minres, A, b)
+    print_solver_results("CUSTOM MINRES", MINRESSparse, A, b, custom_solver=True, method_name='minres')
+    print_solver_results("SCIPY GMRES", sp.linalg.gmres, A, b)
+    print_solver_results("CUSTOM GMRES", GMRESSparse, A, b, custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, A, b, diagonal_preconditioner(A))
+    print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, A, b, ilu_preconditioner(A))
+    print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, A, b)
+    print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, A, b, custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, A, b, diagonal_preconditioner(A))
+    print_solver_results("CUSTOM BiCGSTAB (diagonal preconditioner)", BiCGSTABSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, A, b, ilu_preconditioner(A))
+    print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='bicgstab')
 
 def symmetric_positive_definite_test(dim):
     print("\nSYMMETRIC POSITIVE DEFINITE MATRIX")
     np.random.seed(42)
     A = np.random.rand(dim, dim)
     A = np.dot(A, A.T) + dim * np.eye(dim)
-    b = np.arange(dim)
+    b = np.arange(dim, dtype=np.float64)
     print("A=\n", pd.DataFrame(A))
     print("Condition number of A:", np.linalg.cond(A))
     print("b=", b)
 
-    print("\nSCIPY MINRES")
-    start_time = time.time()
-    x_sol_mres, exitCode = sp.linalg.minres(A, b, show=True)
-    end_time = time.time()
-    print('exitcode=', exitCode)
-    print("x=", x_sol_mres)
-    print("Ax=", A.dot(x_sol_mres))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM MINRES")
-    MR = MINRESSparse(A)
-    start_time = time.time()
-    x_sol_mr = MR.minres(b, np.ones(b.shape))
-    end_time = time.time()
-    print("x_sol_mr=", x_sol_mr)
-    print("Ax=", A.dot(x_sol_mr))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nSCIPY GMRES")
-    start_time = time.time()
-    x_sol_gmres, exitCode = sp.linalg.gmres(A, b)
-    end_time = time.time()
-    print('exitcode=', exitCode)
-    print("x=", x_sol_gmres)
-    print("Ax=", A.dot(x_sol_gmres))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM GMRES")
-    GM = GMRESSparse(A)
-    start_time = time.time()
-    x_sol_gm, res_arr_gm = GM.gmres(b, np.ones(dim))
-    end_time = time.time()
-    print("x=", x_sol_gm)
-    print("res_arr_gm=", res_arr_gm)
-    print("Ax=", A.dot(x_sol_gm))
-    print("Time taken:", end_time - start_time, "seconds")
-    
-    print("\nSCIPY BiCGSTAB")
-    start_time = time.time()
-    x_sol_bicgstab, exitCode = sp.linalg.bicgstab(A, b)
-    end_time = time.time()
-    print("exitcode=", exitCode)
-    print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("Ax=", A.dot(x_sol_bicgstab))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM BiCGSTAB")
-    bicgstab = BiCGSTABSparse(A)
-    start_time = time.time()
-    x_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(b, np.ones(dim))
-    end_time = time.time()
-    print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("res_arr_bicgstab=", res_arr_bicgstab)
-    print("Ax=", A.dot(x_sol_bicgstab))
-    print("Time taken:", end_time - start_time, "seconds")
+    print_solver_results("SCIPY MINRES", sp.linalg.minres, A, b)
+    print_solver_results("CUSTOM MINRES", MINRESSparse, A, b, custom_solver=True, method_name='minres')
+    print_solver_results("SCIPY GMRES", sp.linalg.gmres, A, b)
+    print_solver_results("CUSTOM GMRES", GMRESSparse, A, b, custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, A, b, diagonal_preconditioner(A))
+    print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, A, b, ilu_preconditioner(A))
+    print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, A, b)
+    print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, A, b, custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, A, b, diagonal_preconditioner(A))
+    print_solver_results("CUSTOM BiCGSTAB (diagonal preconditioner)", BiCGSTABSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, A, b, ilu_preconditioner(A))
+    print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='bicgstab')
 
 
 def symmetric_indefinite_test(dim):
     print("\nSYMMETRIC INDEFINITE")
     tri_A = random_tridiagonal_matrix(dim)
-    b = np.arange(dim)
+    b = np.arange(dim, dtype=np.float64)
     S = spaugment(tri_A, 1)
     d = np.append(b, np.zeros(dim))
     print("SOLVING Sy=d for spaugmented system...")
@@ -211,108 +179,45 @@ def symmetric_indefinite_test(dim):
     print("Condition number of S:", np.linalg.cond(S.toarray()))
     print("d=", d)
 
-    print("\nSCIPY MINRES")
-    start_time = time.time()
-    y_sol_mres, exitCode = sp.linalg.minres(S, d, show=True)
-    end_time = time.time()
-    print('exitcode=', exitCode)
-    print("y=", y_sol_mres)
-    print("Sy=", S.dot(y_sol_mres))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM MINRES")
-    MR = MINRESSparse(S)
-    start_time = time.time()
-    y_sol_mr = MR.minres(d, np.ones(d.shape))
-    end_time = time.time()
-    print("y_sol_mr=", y_sol_mr)
-    print("Sy=", S.dot(y_sol_mr))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nSCIPY GMRES")
-    start_time = time.time()
-    y_sol_gmres, exitCode = sp.linalg.gmres(S, d)
-    end_time = time.time()
-    print('exitcode=', exitCode)
-    print("y=", y_sol_gmres)
-    print("Sy=", S.dot(y_sol_gmres))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM GMRES")
-    GM = GMRESSparse(S)
-    start_time = time.time()
-    y_sol_gmres, res_arr_gm = GM.gmres(d, np.ones(dim * 2))
-    end_time = time.time()
-    print("y=", y_sol_gmres)
-    print("res_arr_gm=", res_arr_gm)
-    print("Sy=", S.dot(y_sol_gmres))
-    print("Time taken:", end_time - start_time, "seconds")
-    
-    print("\nSCIPY BiCGSTAB")
-    start_time = time.time()
-    y_sol_bicgstab, exitCode = sp.linalg.bicgstab(S, d, np.ones(dim * 2))
-    end_time = time.time()
-    print("exitcode=", exitCode)
-    print("y_sol_bicgstab=", y_sol_bicgstab)
-    print("Sy=", S.dot(y_sol_bicgstab))
-    print("Time taken:", end_time - start_time, "seconds")
-
-    print("\nCUSTOM BiCGSTAB")
-    bicgstab = BiCGSTABSparse(S)
-    start_time = time.time()
-    y_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(d, np.ones(dim * 2))
-    end_time = time.time()
-    print("y_sol_bicgstab=", y_sol_bicgstab)
-    print("res_arr_bicgstab=", res_arr_bicgstab)
-    print("Sy=", S.dot(y_sol_bicgstab))
-    print("Time taken:", end_time - start_time, "seconds")
+    print_solver_results("SCIPY MINRES", sp.linalg.minres, S, d)
+    print_solver_results("CUSTOM MINRES", MINRESSparse, S, d, custom_solver=True, method_name='minres')
+    print_solver_results("SCIPY GMRES", sp.linalg.gmres, S, d)
+    print_solver_results("CUSTOM GMRES", GMRESSparse, S, d, custom_solver=True, method_name='gmres')
+    # DIAGONAL PRECONDITIONER WILL NOT WORK IF ANY DIAGONAL ENTRY IS ZERO
+    #print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, S, d, diagonal_preconditioner(S))
+    #print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, S, d, diagonal_preconditioner(S), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, S, d, ilu_preconditioner(S))
+    print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, S, d, ilu_preconditioner(S), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, S, b)
+    print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, S, d, custom_solver=True, method_name='bicgstab')
+    # DIAGONAL PRECONDITIONER WILL NOT WORK IF ANY DIAGONAL ENTRY IS ZERO
+    # print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, S, d, diagonal_preconditioner(S))
+    # print_solver_results("CUSTOM BiCGSTAB (diagonal preconditioner)", BiCGSTABSparse, S, d, diagonal_preconditioner(S), custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, S, d, ilu_preconditioner(S))
+    print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, S, d, ilu_preconditioner(S), custom_solver=True, method_name='bicgstab')
 
 
 def nonsymmetric_indefinite_test(dim):
     print("\nNONSYMMETRIC INDEFINITE MATRIX")
     A = generate_indefinite_nonsymmetric_matrix(dim)
-    b = np.arange(dim)
+    b = np.arange(dim, dtype=np.float64)
     print("A=\n", pd.DataFrame(A.toarray()))
     print("Condition number of A:", np.linalg.cond(A.toarray()))
     print("b=", b)
 
-    print("\nSCIPY GMRES")
-    start_time = time.time()
-    x_sol_gmres, exitCode = sp.linalg.gmres(A, b)
-    end_time = time.time()
-    print('exitcode=', exitCode)
-    print("x=", x_sol_gmres)
-    print("Ax=", A.dot(x_sol_gmres))
-    print("Time taken:", end_time - start_time, "seconds")
+    print_solver_results("SCIPY GMRES", sp.linalg.gmres, A, b)
+    print_solver_results("CUSTOM GMRES", GMRESSparse, A, b, custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, A, b, diagonal_preconditioner(A))
+    print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, A, b, ilu_preconditioner(A))
+    print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gmres')
+    print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, A, b)
+    print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, A, b, custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, A, b, diagonal_preconditioner(A))
+    print_solver_results("CUSTOM BiCGSTAB (diagonal preconditioner)", BiCGSTABSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='bicgstab')
+    print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, A, b, ilu_preconditioner(A))
+    print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='bicgstab')
 
-    print("\nCUSTOM GMRES")
-    GM = GMRESSparse(A)
-    start_time = time.time()
-    x_sol_gmres, res_arr_gm = GM.gmres(b, np.ones(dim))
-    end_time = time.time()
-    print("x=", x_sol_gmres)
-    print("res_arr_gm=", res_arr_gm)
-    print("Ax=", A.dot(x_sol_gmres))
-    print("Time taken:", end_time - start_time, "seconds")
-    
-    print("\nSCIPY BiCGSTAB")
-    start_time = time.time()
-    x_sol_bicgstab, exitCode = sp.linalg.bicgstab(A, b, np.ones(dim))
-    end_time = time.time()
-    print("exitcode=", exitCode)
-    print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("Ax=", A.dot(x_sol_bicgstab))
-    print("Time taken:", end_time - start_time, "seconds")
-    
-    print("\nCUSTOM BiCGSTAB")
-    bicgstab = BiCGSTABSparse(A)
-    start_time = time.time()
-    x_sol_bicgstab, res_arr_bicgstab = bicgstab.bicgstab(b, np.ones(dim))
-    end_time = time.time()
-    print("x_sol_bicgstab=", x_sol_bicgstab)
-    print("res_arr_bicgstab=", res_arr_bicgstab)
-    print("Ax=", A.dot(x_sol_bicgstab))
-    print("Time taken:", end_time - start_time, "seconds")
 
 def main(dim):
     print("--== BEGINNING TESTING ==--\n")
@@ -322,10 +227,6 @@ def main(dim):
     nonsymmetric_indefinite_test(dim)
 
 if __name__ == "__main__":
-    main(23) # 4 < dim < 24
+    main(8) # 4 < dim < 24
              # at dim=25, custom bicgstab works, but not scipy.
-             # at dim=24, scipy and custom bicgstab work. Both GMRES
-             # 
-    
-# do diagonal preconditioners. incomplete LU
-# should not take more than one iteration for GMRES to converge with Identity matrix
+             # at dim=24, scipy and custom bicgstab work. Both GMRES fail.

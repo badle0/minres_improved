@@ -376,7 +376,6 @@ class GMRESSparse:
                 if h1 <= eps*h0:
                     h[col, col + 1] = 0
                     breakdown = True
-                    print('BREAKDOWN OCCURRED')
                 else:
                     v[col + 1, :] *= (1 / h1)
 
