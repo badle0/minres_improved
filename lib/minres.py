@@ -586,159 +586,45 @@ class MINRESSparse:
 
         # 7. Wrap and return (depends on your code structure)
         return MINRESSparse(M_inv)
-
-
-    # an old algorithm that directly passes in preconditioner matrix as parameter, now uses pcmr_normal that passes in
-    # preconditioner multiplying function
-    def pc_minres(self, b, x0, M_inv, max_iter=100, tol=1e-10, verbose=False):
+    
+    def create_diagonal_modified_preconditioner(self):
         """
-        Solves the linear system Ax = b using the Preconditioned MINRES algorithm.
-
-        Args:
-            b (np.array): The right-hand side vector.
-            x0 (np.array): The initial guess for the solution.
-            M_inv (np.array): A preconditioning matrix, in deepminres example is a diagonal matrix
-            tol (float): The tolerance for convergence.
-            max_iter (int): The maximum number of iterations.
-            verbose (bool): If True, print the progress.
-
-        Returns:
-            tuple: The solution vector x and the array of residuals.
+        Creates a modified diagonal (Jacobi) preconditioner for the augmented matrix
+        S = [I, A; A^T, 0]. For the primal block (first n entries), the diagonal is 1.
+        For the dual block (last n entries), we approximate the diagonal by computing 
+        the diagonal of A^T A, i.e. the sum of squares of the entries in each column of A.
+        Wherever this computed diagonal is zero, we set it to 1.
+        The preconditioner is then given by:
+    
+            M_inv = diag( 1, ..., 1, 1/((A^T A)_{11}), ..., 1/((A^T A)_{nn}) ).
         """
-        n = len(b)
-        msg = [ ' beta1 = 0.  The exact solution is x0              ',   # 0
-                ' A solution to Ax = b was found, given rtol        ',   # 1
-                ' A least-squares solution was found, given rtol    ',   # 2
-                ' Reasonable accuracy achieved, given eps           ',   # 3
-                ' The iteration limit was reached                   ']   # 4
+        N = self.A_sparse.shape[0]
+        if N % 2 != 0:
+            raise ValueError("Expected an augmented matrix with even dimension.")
+        n = N // 2
 
-        istop = 0
-        itn = 0
-        Anorm = 0
-        Acond = 0
-        rnorm = 0
-        ynorm = 0
-        x = x0.copy()
-        if x0 is None:
-            r1 = b.copy()
-        else:
-            r1 = b - self.multiply_A(x0)
-        y = M_inv.multiply(r1)
-        beta1 = self.dot(r1, y)
-        if beta1 == 0:
-            return x0, beta1
-        beta1 = np.sqrt(beta1)
-        oldb = 0
-        beta = beta1
-        dbar = 0
-        epsln = 0
-        qrnorm = beta1
-        phibar = beta1
-        rhs1 = beta1
-        rhs2 = 0
-        tnorm2 = 0
-        gmax = 0
-        gmin = np.finfo(float).max
-        cs = -1
-        sn = 0
-        w = np.zeros(n)
-        w2 = np.zeros(n)
-        r2 = r1
-        res_arr = [beta1]
+        # For the primal block, the diagonal is 1 (from I)
+        primal_diag = np.ones(n, dtype=np.float32)
 
-        for itn in range(max_iter):
-            s = 1.0/beta
-            v = s*y
-            y = self.multiply_A(v)
-            if itn >= 2:
-                y = y - (beta / oldb) * r1
-            alpha = self.dot(v, y)
-            y = y - (alpha / beta) * r1
-            r1 = r2
-            r2 = y
-            y = M_inv.multiply_A(r2)
-            oldb = beta
-            beta = self.dot(r2, y)
-            if beta < 0:
-                raise ValueError('non-symmetric matrix')
-            beta = np.sqrt(beta)
-            tnorm2 += alpha ** 2 + oldb ** 2 + beta ** 2
-            oldeps = epsln
-            delta = cs * dbar + sn * alpha
-            gbar = sn * dbar - cs * alpha
-            epsln = sn * beta
-            dbar = - cs * beta
-            root = np.sqrt(gbar ** 2 + dbar ** 2)
-            Arnorm = phibar * root
-            gamma = np.sqrt(gbar ** 2 + beta ** 2)
-            gamma = max(gamma, np.finfo(float).eps)
-            cs = gbar / gamma
-            sn = beta / gamma
-            phi = cs * phibar
-            phibar = sn * phibar
-            denom = 1.0 / gamma
-            w1 = w2
-            w2 = w
-            w = (v - oldeps * w1 - delta * w2) * denom
-            x = x + phi * w
-            gmax = max(gmax, gamma)
-            gmin = min(gmin, gamma)
-            z = rhs1 / gamma
-            rhs1 = rhs2 - delta * z
-            rhs2 = - epsln * z
-            Anorm = np.sqrt(tnorm2)
-            ynorm = self.norm(x)
-            epsa = Anorm * np.finfo(float).eps
-            epsx = Anorm * ynorm * np.finfo(float).eps
-            epsr = Anorm * ynorm * tol
-            diag = gbar
-            if diag == 0:
-                diag = epsa
-            qrnorm = phibar
-            rnorm = qrnorm
-            if ynorm == 0 or Anorm == 0:
-                test1 = inf
-            else:
-                test1 = rnorm / (Anorm*ynorm)
-            if Anorm == 0:
-                test2 = inf
-            else:
-                test2 = root / Anorm
-            Acond = gmax / gmin
+        # For the dual block, the diagonal of S is zero.
+        # Instead, we compute the diagonal of A^T A,
+        # where A is extracted from the (1,2) block of S.
+        A = self.A_sparse[:n, n:2*n]
+        # Compute the sum of squares of each column of A.
+        dual_diag = np.array(A.power(2).sum(axis=0)).flatten()  # shape (n,)
+    
+        # If any entry is zero, replace it by 1 to avoid division by zero.
+        zero_mask = (dual_diag == 0.0)
+        dual_diag[zero_mask] = 1.0
 
-            if istop == 0:
-                t1 = 1 + test1      # These tests work if rtol < eps
-                t2 = 1 + test2
-                if t2 <= 1:
-                    istop = 2
-                if t1 <= 1:
-                    istop = 1
-                if itn >= max_iter:
-                    istop = 4
-                if epsx >= beta1:
-                    istop = 3
-                # if rnorm <= epsx   : istop = 2
-                # if rnorm <= epsr   : istop = 1
-                if test2 <= tol:
-                    istop = 2
-                if test1 <= tol:
-                    istop = 1
-            
-            if verbose:
-                print(f"Iteration {itn+1}, test1: {test1}")
-                res_arr.append(rnorm)
+        # The preconditioner approximates the inverse diagonal for the dual block:
+        dual_precond_diag = 1.0 / dual_diag
 
-            if istop != 0:
-                break
-
-        print("MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn+1:5g}')
-        print("MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
-        print("MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
-        print("MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
-        print("MINRES stopped" + msg[istop])
-
-        return x, res_arr
-
+        # Combine the primal and dual parts:
+        M_inv_diag = np.concatenate([primal_diag, dual_precond_diag])
+    
+        M_inv = sparse.diags(M_inv_diag)
+        return MINRESSparse(M_inv)
 
     def pmr_normal(self, b, x0, precond, max_iter=100, tol=1e-10, verbose=False):
         """
@@ -886,11 +772,11 @@ class MINRESSparse:
             if istop != 0:
                 break
 
-        print("Traditional MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn:5g}')
-        print("Traditional MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
-        print("Traditional MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
-        print("Traditional MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
-        print("Traditional MINRES stopped" + msg[istop])
+        print("Preconditioned MINRES stopped" + f' istop   =  {istop:3g}               itn   ={itn:5g}')
+        print("Preconditioned MINRES stopped" + f' Anorm   =  {Anorm:12.4e}      Acond =  {Acond:12.4e}')
+        print("Preconditioned MINRES stopped" + f' rnorm   =  {rnorm:12.4e}      ynorm =  {ynorm:12.4e}')
+        print("Preconditioned MINRES stopped" + f' Arnorm  =  {Arnorm:12.4e}')
+        print("Preconditioned MINRES stopped" + msg[istop])
 
         return x
 

@@ -137,7 +137,14 @@ if not args.skip_mr:
 if not args.skip_dpmr:
     print("DiagonalPMR is running...")
     t0 = time.time()
-    M_inv = MR.create_diagonal_preconditioner()
+    M_inv = MR.create_diagonal_modified_preconditioner()
+
+    def ic_precond(x):
+        return M_inv.multiply_A(x)
+
+    x_sol_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
+    time_cg = time.time() - t0
+    print("DiagonalPMR took ", time_cg, " secs")
 
     def ic_precond(x):
         return M_inv.multiply_A(x)

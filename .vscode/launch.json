@@ -23,7 +23,11 @@
                 "--verbose_deepmr", "False",
                 "--dataset_dir", "/data/hsheng/virtualenvs/minres_improved/2024minresdata",
                 "--trained_model_dir", "/data/hsheng/virtualenvs/minres_improved/lstsquares_filtered_training/3D_N64/minres_improved",
-                "--CUDA_VISIBLE_DEVICES", "1"
+                "--CUDA_VISIBLE_DEVICES", "1",
+                "--skip_ilupmr",
+                "--skip_icpmr",
+                "--skip_bdpmr",
+                "--skip_alpmr"
             ]
         }
     ]
