@@ -105,81 +105,6 @@ class BiCGSTABSparse:
             np.array: The indices of the zero rows.
         """
         return np.where(self.A_sparse.getnnz(1) == 0)[0]
-        
-    def bicgstab_old(self, b, x0, max_iter=1000, rtol=1e-10, atol=0.0):
-        """
-        Solves the linear system Ax = b using the BiConjugate Gradient Stabilized (BiCGSTAB) method.
-
-        Args:
-            b (np.array): The right-hand side vector.
-            x0 (np.array): The initial guess for the solution.
-            rtol (float): The relative tolerance for convergence.
-            atol (float): The absolute tolerance for convergence.
-            max_iter (int): The maximum number of iterations.
-
-        Returns:
-            tuple: The solution vector x and the array of residuals.
-        """
-        n = len(b)
-        bnrm2 = np.linalg.norm(b)
-        if bnrm2 == 0:
-            return x0, [0]
-
-        atol = max(float(atol), float(rtol) * float(bnrm2))
-
-        x = x0.copy()
-        r = b - self.multiply_A(x)
-        rhat = r.copy()
-        p = r.copy()
-        phat = p.copy()
-        rho_old = 1.0
-        alpha = 1.0
-        omega = 1.0
-
-        residual_norm = np.linalg.norm(r)
-        res = []
-        res.append(residual_norm)
-        
-        # if initial guess is within the residual tolerance
-        if residual_norm <= rtol * bnrm2 + atol:
-                print(f"BiCGSTAB converged in {1} iterations with residual {residual_norm}.")
-                return x, res
-
-        for iteration in range(max_iter):
-            rho_new = np.dot(rhat, r)
-            if rho_old == 0:
-                print(f"ERROR: Rho breakdown @ iter={iteration}, rho_old=0")
-                return x, res
-            beta = (rho_new / rho_old) * (alpha / omega)
-            p = r + beta * (p - omega * phat)
-            phat = self.multiply_A(p)
-
-            # Compute alpha
-            alpha = rho_new / np.dot(rhat, phat)
-            s = r - alpha * phat
-
-            # Check for convergence before applying second correction
-            residual_norm = np.linalg.norm(s)
-            res.append(residual_norm)
-
-            if residual_norm <= rtol * bnrm2 + atol:
-                print(f"BiCGSTAB converged in {iteration + 1} iterations with residual {residual_norm}.")
-                return x + alpha * p, res
-
-            # Compute omega (for second correction)
-            t = self.multiply_A(s)
-            omega = np.dot(t, s) / np.dot(t, t)
-            x += alpha * p + omega * s
-
-            # Update residual for next iteration
-            r = s - omega * t
-
-            rho_old = rho_new
-
-        print(f"BiCGSTAB stopped after {max_iter} iterations with residual {residual_norm}.")
-        return x, res
-    
-    
     
     def bicgstab(self, b, x0=None, *, rtol=1e-5, atol=0., maxiter=None, M=None,
              callback=None):
@@ -279,8 +204,8 @@ class BiCGSTABSparse:
         rho_prev, omega, alpha, p, v = None, None, None, None, None
 
         # Initial residual
-        r = b - matvec(x) if x.any() else b.copy()
-        rtilde = r.copy()
+        r = b - matvec(x) if x.any() else b.copy() # NON-LOOP: WIKI STEP 1
+        rtilde = r.copy() # NON-LOOP WIKI STEP 2
 
         for iteration in range(maxiter):
             # Check for convergence
@@ -289,7 +214,7 @@ class BiCGSTABSparse:
                 return postprocess(x), 0
 
             # Compute rho
-            rho = dotprod(rtilde, r)
+            rho = dotprod(rtilde, r) # NON-LOOP WIKI STEP 3 | LOOP STEP 11 
             if np.abs(rho) < rhotol:  # Check for rho breakdown
                 return postprocess(x), -10
 
@@ -298,37 +223,43 @@ class BiCGSTABSparse:
                     return postprocess(x), -11
 
                 # Update beta and p
-                beta = (rho / rho_prev) * (alpha / omega)
+                beta = (rho / rho_prev) * (alpha / omega) # WIKI STEP 12
+                # WIKI STEP 13: NEXT 3 LINES
                 p -= omega*v
                 p *= beta
-                p += r
+                p += r # WIKI STEP 13
             else:  # First iteration
                 s = np.empty_like(r)
-                p = r.copy()
+                p = r.copy() # NON-LOOP WIKI STEP 4
 
             # Apply preconditioner
             phat = psolve(p)
-            v = matvec(phat)
+            v = matvec(phat) # WIKI STEP 1
             rv = dotprod(rtilde, v)
             if rv == 0:
                 return postprocess(x), -11
-            alpha = rho / rv
-            r -= alpha*v
-            s[:] = r[:]
+            alpha = rho / rv # WIKI STEP 3
+            r -= alpha*v # WIKI STEP 4
+            s[:] = r[:]  # WIKI STEP 4
 
-            # Check for convergence
-            if np.linalg.norm(s) < atol:
+            # MAIN CONVERGENCE CRITERIA: Check for convergence
+            if np.linalg.norm(s) < atol: 
+                # if s (step p-in p residual) is already small, then step and return x
                 x += alpha*phat
-                print(f"Converged in {iteration + 1} iterations")
+                print(f"BiCGSTAB Converged in {iteration + 1} iterations")
                 return postprocess(x), 0
 
+            # continue if residual with step is not small enough
             # Apply preconditioner to s
             shat = psolve(s)
-            t = matvec(shat)
-            omega = dotprod(t, s) / dotprod(t, t)
-            x += alpha*phat
-            x += omega*shat
-            r -= omega*t
+            t = matvec(shat) # WIKI STEP 6
+            omega = dotprod(t, s) / dotprod(t, t) # WIKI STEP 7
+            # update x by taking the steps
+            x += alpha*phat # WIKI STEP 3 + 8
+            x += omega*shat # WIKI STEP 8
+            
+            # r is overall residual after step in p and correction step in s
+            r -= omega*t # WIKI STEP 9 (at this point, s = r)
             rho_prev = rho
 
             if callback:
@@ -339,4 +270,132 @@ class BiCGSTABSparse:
             print(f"Did not converge within the maximum number of iterations: {maxiter}")
             return postprocess(x), maxiter
 
-                
+
+    def deep_bicgstab(self, b, x0=None, model_predict=None, rtol=1e-5, atol=0., maxiter=None, M=None,
+                    callback=None, fluid=False, verbose=True):
+        """
+        Use Deep Biconjugate Gradient Stabilized (Deep-BiCGSTAB) method with machine learning to predict the search direction.
+
+        Parameters:
+        -----------
+        b : ndarray
+            Right-hand side of the linear system.
+        x0 : ndarray, optional
+            Starting guess for the solution.
+        model_predict : function
+            A machine learning model that predicts the search direction given the residual.
+        rtol, atol : float, optional
+            Parameters for the convergence test. For convergence,
+            ``norm(b - A @ x) <= max(rtol*norm(b), atol)`` should be satisfied.
+        maxiter : integer, optional
+            Maximum number of iterations.
+        M : {sparse array, ndarray, LinearOperator}, optional
+            Preconditioner for `A`.
+        callback : function, optional
+            User-supplied function to call after each iteration.
+        fluid : bool, optional
+            If True, the model will predict using the raw residual. If False, it uses the normalized residual.
+        verbose : bool, optional
+            If True, prints progress information during iterations.
+
+        Returns:
+        --------
+        x : ndarray
+            The converged solution.
+        info : integer
+            Convergence information.
+        """
+        # Prepare the system for solving
+        A, M, x, b, postprocess = make_system(self.A_sparse, M, x0, b) 
+        bnrm2 = np.linalg.norm(b)
+
+        # Calculate the absolute tolerance
+        atol = max(float(atol), float(rtol) * float(bnrm2))
+        
+        if bnrm2 == 0:
+            return postprocess(b), 0 
+
+        n = len(b)
+
+        dotprod = np.vdot if np.iscomplexobj(x) else np.dot
+
+        if maxiter is None:
+            maxiter = n*10
+
+        matvec = A.matvec
+        psolve = M.matvec
+
+        # Tolerance values for breakdown checks
+        rhotol = np.finfo(x.dtype.char).eps**2
+        omegatol = rhotol
+
+        # Dummy values to initialize variables
+        rho_prev, omega, alpha, p, v = None, None, None, None, None
+
+        # Initial residual
+        r = b - matvec(x) if x.any() else b.copy() # NON-LOOP: WIKI STEP 1
+        rtilde = r.copy() # NON-LOOP WIKI STEP 2
+
+        for iteration in range(maxiter):
+            # Check for convergence
+            if np.linalg.norm(r) < atol:
+                print(f"Converged in {iteration + 1} iterations")
+                return postprocess(x), 0
+
+            # Compute rho
+            rho = dotprod(rtilde, r) # NON-LOOP WIKI STEP 3 | LOOP STEP 11 
+            if np.abs(rho) < rhotol:  # Check for rho breakdown
+                return postprocess(x), -10
+
+            if iteration > 0:
+                if np.abs(omega) < omegatol:  # Check for omega breakdown
+                    return postprocess(x), -11
+
+                # Update beta and p
+                beta = (rho / rho_prev) * (alpha / omega) # WIKI STEP 12
+                p = model_predict(r) # Use the model to predict the search direction
+                # WIKI STEP 13: NEXT 3 LINES
+                # p -= omega*v
+                # p *= beta
+                # p += r # WIKI STEP 13
+            else:  # First iteration
+                s = np.empty_like(r)
+                p = r.copy() # NON-LOOP WIKI STEP 4
+
+            # Apply preconditioner
+            phat = psolve(p)
+            v = matvec(phat) # WIKI STEP 1
+            rv = dotprod(rtilde, v)
+            if rv == 0:
+                return postprocess(x), -11
+            alpha = rho / rv # WIKI STEP 3
+            r -= alpha*v # WIKI STEP 4
+            s[:] = r[:]  # WIKI STEP 4
+
+            # MAIN CONVERGENCE CRITERIA: Check for convergence
+            if np.linalg.norm(s) < atol: 
+                # if s (step p-in p residual) is already small, then step and return x
+                x += alpha*phat
+                print(f"Converged in {iteration + 1} iterations")
+                return postprocess(x), 0
+
+            # continue if residual with step is not small enough
+            # Apply preconditioner to s
+            shat = psolve(s)
+            t = matvec(shat) # WIKI STEP 6
+            omega = dotprod(t, s) / dotprod(t, t) # WIKI STEP 7
+            # update x by taking the steps
+            x += alpha*phat # WIKI STEP 3 + 8
+            x += omega*shat # WIKI STEP 8
+            
+            # r is overall residual after step in p and correction step in s
+            r -= omega*t # WIKI STEP 9 (at this point, s = r)
+            rho_prev = rho
+
+            if callback:
+                callback(x)
+
+        else:  # for loop exhausted
+            # Return incomplete progress
+            print(f"Deep BiCGSTAB did not converge within the maximum number of iterations: {maxiter}")
+            return postprocess(x), maxiter

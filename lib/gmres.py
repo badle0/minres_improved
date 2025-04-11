@@ -403,7 +403,7 @@ class GMRESSparse:
                     break
                 if presid <= ptol or breakdown:
                     break
-
+            # arnoldi process to generate hessenberg matrix. 
             # Solve the upper triangular system
             if h[col, col] == 0:
                 S[col] = 0
@@ -419,6 +419,10 @@ class GMRESSparse:
                 y[0] /= h[0, 0]
 
             # Update the solution
+            # v is the matrix of Orthogonalized Krylov Vectors
+            # Each column v_i represents the i-th Krylov vector
+            
+            #result of upper triangular system y is multiplied by the orthogonalized Krylov vectors
             x += y @ v[:col+1, :]
 
             # Compute the new residual
