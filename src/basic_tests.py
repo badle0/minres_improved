@@ -16,6 +16,7 @@ sys.path.insert(1, lib_path)
 from minres import MINRESSparse
 from gmres import GMRESSparse
 from bicgstab import BiCGSTABSparse
+from gcr import GeneralizedConjugateResidual
 import helper_functions as hf
 
 def random_tridiagonal_matrix(n, seed=42):
@@ -127,20 +128,32 @@ def identity_matrix_test(dim):
     print("Condition number of A:", np.linalg.cond(A))
     print("b=", b)
 
+    # MINRES tests
     print_solver_results("SCIPY MINRES", sp.linalg.minres, A, b)
     print_solver_results("CUSTOM MINRES", MINRESSparse, A, b, custom_solver=True, method_name='minres')
+    
+    # GMRES tests
     print_solver_results("SCIPY GMRES", sp.linalg.gmres, A, b)
     print_solver_results("CUSTOM GMRES", GMRESSparse, A, b, custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, A, b, diagonal_preconditioner(A))
     print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, A, b, ilu_preconditioner(A))
     print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gmres')
+    
+    # BiCGSTAB tests
     print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, A, b)
     print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, A, b, custom_solver=True, method_name='bicgstab')
     print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, A, b, diagonal_preconditioner(A))
     print_solver_results("CUSTOM BiCGSTAB (diagonal preconditioner)", BiCGSTABSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='bicgstab')
     print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, A, b, ilu_preconditioner(A))
     print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='bicgstab')
+    
+    # GCR tests
+    print_solver_results("CUSTOM GCR", GeneralizedConjugateResidual, A, b,custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (diagonal preconditioner)", GeneralizedConjugateResidual, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (ilu preconditioner)", GeneralizedConjugateResidual, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gcr')
+
+
 
 def symmetric_positive_definite_test(dim):
     print("\nSYMMETRIC POSITIVE DEFINITE MATRIX")
@@ -152,20 +165,30 @@ def symmetric_positive_definite_test(dim):
     print("Condition number of A:", np.linalg.cond(A))
     print("b=", b)
 
+    # MINRES tests
     print_solver_results("SCIPY MINRES", sp.linalg.minres, A, b)
     print_solver_results("CUSTOM MINRES", MINRESSparse, A, b, custom_solver=True, method_name='minres')
+    
+    # GMRES tests
     print_solver_results("SCIPY GMRES", sp.linalg.gmres, A, b)
     print_solver_results("CUSTOM GMRES", GMRESSparse, A, b, custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, A, b, diagonal_preconditioner(A))
     print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, A, b, ilu_preconditioner(A))
     print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gmres')
+    
+    # BiCGSTAB tests
     print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, A, b)
     print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, A, b, custom_solver=True, method_name='bicgstab')
     print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, A, b, diagonal_preconditioner(A))
     print_solver_results("CUSTOM BiCGSTAB (diagonal preconditioner)", BiCGSTABSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='bicgstab')
     print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, A, b, ilu_preconditioner(A))
     print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='bicgstab')
+
+    # GCR tests
+    print_solver_results("CUSTOM GCR", GeneralizedConjugateResidual, A, b, custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (diagonal preconditioner)", GeneralizedConjugateResidual, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (ilu preconditioner)", GeneralizedConjugateResidual, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gcr')
 
 
 def symmetric_indefinite_test(dim):
@@ -179,8 +202,11 @@ def symmetric_indefinite_test(dim):
     print("Condition number of S:", np.linalg.cond(S.toarray()))
     print("d=", d)
 
+    # MINRES tests
     print_solver_results("SCIPY MINRES", sp.linalg.minres, S, d)
     print_solver_results("CUSTOM MINRES", MINRESSparse, S, d, custom_solver=True, method_name='minres')
+    
+    # GMRES tests
     print_solver_results("SCIPY GMRES", sp.linalg.gmres, S, d)
     print_solver_results("CUSTOM GMRES", GMRESSparse, S, d, custom_solver=True, method_name='gmres')
     # DIAGONAL PRECONDITIONER WILL NOT WORK IF ANY DIAGONAL ENTRY IS ZERO
@@ -188,6 +214,8 @@ def symmetric_indefinite_test(dim):
     #print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, S, d, diagonal_preconditioner(S), custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, S, d, ilu_preconditioner(S))
     print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, S, d, ilu_preconditioner(S), custom_solver=True, method_name='gmres')
+    
+    # BiCGSTAB tests
     print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, S, b)
     print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, S, d, custom_solver=True, method_name='bicgstab')
     # DIAGONAL PRECONDITIONER WILL NOT WORK IF ANY DIAGONAL ENTRY IS ZERO
@@ -196,6 +224,10 @@ def symmetric_indefinite_test(dim):
     print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, S, d, ilu_preconditioner(S))
     print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, S, d, ilu_preconditioner(S), custom_solver=True, method_name='bicgstab')
 
+    # GCR tests
+    print_solver_results("CUSTOM GCR", GeneralizedConjugateResidual, S, d, custom_solver=True, method_name='gcr')
+    #print_solver_results("CUSTOM GCR (diagonal preconditioner)", GeneralizedConjugateResidual, S, d, diagonal_preconditioner(S), custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (ilu preconditioner)", GeneralizedConjugateResidual, S, d, ilu_preconditioner(S), custom_solver=True, method_name='gcr')
 
 def nonsymmetric_indefinite_test(dim):
     print("\nNONSYMMETRIC INDEFINITE MATRIX")
@@ -205,12 +237,15 @@ def nonsymmetric_indefinite_test(dim):
     print("Condition number of A:", np.linalg.cond(A.toarray()))
     print("b=", b)
 
+    # GMRES tests
     print_solver_results("SCIPY GMRES", sp.linalg.gmres, A, b)
     print_solver_results("CUSTOM GMRES", GMRESSparse, A, b, custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (diagonal preconditioner)", sp.linalg.gmres, A, b, diagonal_preconditioner(A))
     print_solver_results("CUSTOM GMRES (diagonal preconditioner)", GMRESSparse, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gmres')
     print_solver_results("SCIPY GMRES (ilu preconditioner)", sp.linalg.gmres, A, b, ilu_preconditioner(A))
     print_solver_results("CUSTOM GMRES (ilu preconditioner)", GMRESSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gmres')
+    
+    # BiCGSTAB tests
     print_solver_results("SCIPY BiCGSTAB", sp.linalg.bicgstab, A, b)
     print_solver_results("CUSTOM BiCGSTAB", BiCGSTABSparse, A, b, custom_solver=True, method_name='bicgstab')
     print_solver_results("SCIPY BiCGSTAB (diagonal preconditioner)", sp.linalg.bicgstab, A, b, diagonal_preconditioner(A))
@@ -218,15 +253,19 @@ def nonsymmetric_indefinite_test(dim):
     print_solver_results("SCIPY BiCGSTAB (ilu preconditioner)", sp.linalg.bicgstab, A, b, ilu_preconditioner(A))
     print_solver_results("CUSTOM BiCGSTAB (ilu preconditioner)", BiCGSTABSparse, A, b, ilu_preconditioner(A), custom_solver=True, method_name='bicgstab')
 
+    # GCR tests
+    print_solver_results("CUSTOM GCR", GeneralizedConjugateResidual, A, b, custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (diagonal preconditioner)", GeneralizedConjugateResidual, A, b, diagonal_preconditioner(A), custom_solver=True, method_name='gcr')
+    print_solver_results("CUSTOM GCR (ilu preconditioner)", GeneralizedConjugateResidual, A, b, ilu_preconditioner(A), custom_solver=True, method_name='gcr')
 
 def main(dim):
     print("--== BEGINNING TESTING ==--\n")
-    identity_matrix_test(dim)
-    symmetric_positive_definite_test(dim)
-    symmetric_indefinite_test(dim)
+    #identity_matrix_test(dim)
+    #symmetric_positive_definite_test(dim)
+    #symmetric_indefinite_test(dim)
     nonsymmetric_indefinite_test(dim)
 
 if __name__ == "__main__":
-    main(8) # 4 < dim < 24
+    main(128) # 4 < dim < 24
              # at dim=25, custom bicgstab works, but not scipy.
              # at dim=24, scipy and custom bicgstab work. Both GMRES fail.

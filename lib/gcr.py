@@ -105,7 +105,8 @@ class GeneralizedConjugateResidual:
         """
         return np.where(self.A_sparse.getnnz(1) == 0)[0]
     
-    
+    # based off of this link and following standard scipy implementation:
+    # https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=7dcb4567b950c8260d9df8f6473de99cf97a69a3
     def gcr(self, b, x0=None, *, rtol=1e-5, atol=0., maxiter=None, M=None,
         callback=None):
         """Use Generalized Conjugate Residual iteration to solve ``Ax = b``.
@@ -164,6 +165,7 @@ class GeneralizedConjugateResidual:
 
         for k in range(maxiter):
             if res_norm < atol:
+                print(f"Converged in {k} iterations")
                 return postprocess(x), 0
 
             z = psolve(r) # search direction p
