@@ -98,8 +98,8 @@ def get_vector_from_source(file_rhs, d_type=np.float32):
 
 print("Matrix A and rhs b is loading...")
 initial_normalization = False
-b_file_name = dataset_path + "/lstsquareproblem/test_dataset/" + "d_test3.bin"
-A_file_name = dataset_path + "/lstsquareproblem/test_dataset/" + "S_test3.bin"
+b_file_name = dataset_path + "/lstsquareproblem/test_dataset/" + "d_test1.bin"
+A_file_name = dataset_path + "/lstsquareproblem/test_dataset/" + "S_test1.bin"
 A = hf.readA_sparse(N, A_file_name, 'f')
 b = get_vector_from_source(b_file_name)
 MR = mr.MINRESSparse(A)
@@ -123,9 +123,13 @@ if not args.skip_deepmr:
     print("DEEPMINRES is running...")
     t0 = time.time()
     max_mr_iter = 1000
-    x_sol = MR.deepminres(b, np.zeros(b.shape), model_predict, max_mr_iter, tol, verbose_deepmr)
+    x_sol = MR.deepminres_givens2(b, np.zeros(b.shape), model_predict, max_mr_iter, tol, verbose_deepmr)
     time_cg_ml = time.time() - t0
     print("DEEPMINRES took ", time_cg_ml, " secs.")
+
+    r = b - A.dot(x_sol)
+    residual_norm = np.linalg.norm(r)
+    print("Residual norm after DEEPMINRES: ", residual_norm)
     
 if not args.skip_mr:
     print("MINRES is running...")
@@ -133,6 +137,10 @@ if not args.skip_mr:
     x_sol_mr = MR.minres(b, np.zeros(b.shape), max_mr_iter, tol, True)
     time_cg = time.time() - t0
     print("MINRES took ", time_cg, " secs")
+
+    r = b - A.dot(x_sol_mr)
+    residual_norm = np.linalg.norm(r)
+    print("Residual norm after Traditional MINRES: ", residual_norm)
 
 if not args.skip_dpmr:
     print("DiagonalPMR is running...")
@@ -142,16 +150,13 @@ if not args.skip_dpmr:
     def ic_precond(x):
         return M_inv.multiply_A(x)
 
-    x_sol_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
+    x_sol_pmr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
     time_cg = time.time() - t0
     print("DiagonalPMR took ", time_cg, " secs")
 
-    def ic_precond(x):
-        return M_inv.multiply_A(x)
-
-    x_sol_mr = MR.pmr_normal(b, np.zeros(b.shape), ic_precond, max_mr_iter, tol, verbose_deepmr)
-    time_cg = time.time() - t0
-    print("DiagonalPMR took ", time_cg, " secs")
+    r = b - A.dot(x_sol_pmr)
+    residual_norm = np.linalg.norm(r)
+    print("Residual norm after Diagonal Preconditioned MINRES: ", residual_norm)
 
 if not args.skip_ilupmr:
     LiLUmr_test_folder = dataset_path + "/test_dataset/N64/" + "L.npz"

@@ -58,11 +58,8 @@ if N == 64:
 elif N == 128:
     A_file_name = os.path.join(args.dataset_dir, "tridiagA_3d.bin")
 print("Start loading matrix A from " + A_file_name)
-start_matrix = time.time()
 A = hf.readA_sparse_from_bin(dim_b, A_file_name, 'f')
 print(f"Shape of matrix A: {A.shape}, dtype: {A.dtype}")
-end_matrix = time.time()
-print(f"Matrix loading finished in {end_matrix - start_matrix:.2f} seconds.")
 
 # Initialize MINRES solver with the matrix A
 MR = mr.MINRESSparse(A)
@@ -98,12 +95,29 @@ end_eigen = time.time()
 print(f"Eigenvalue calculation finished in {end_eigen - start_eigen:.2f} seconds.")
 ritz_vals = np.real(ritz_vals)
 Q0 = np.real(Q0)
+plt.figure()
+plt.hist(ritz_vals, bins=50, color='skyblue', edgecolor='k')
+plt.title("Histogram of Ritz Eigenvalues")
+plt.xlabel("Eigenvalue")
+plt.ylabel("Frequency")
+plt.show()
+print("Min Ritz eigenvalue:", np.min(ritz_vals))
+print("Max Ritz eigenvalue:", np.max(ritz_vals))
+print("Mean Ritz eigenvalue:", np.mean(ritz_vals))
+print("Median Ritz eigenvalue:", np.median(ritz_vals))
+print("Std Ritz eigenvalue:", np.std(ritz_vals))
 
 # %% Transform back to the full space using Ritz vectors
 ritz_vectors = np.matmul(W.transpose(), Q0).transpose()
 
 if ritz_vectors.shape[1] > dim_b:
     ritz_vectors = ritz_vectors[:, :dim_b]
+
+print(f"Ritz vectors shape: {ritz_vectors.shape}")
+# Identify negative eigenvalues if you want to do special weighting
+neg_indices = np.where(ritz_vals < 0)[0]
+pos_indices = np.where(ritz_vals >= 0)[0]
+print(f"Found {len(neg_indices)} negative, {len(pos_indices)} non-negative out of {len(ritz_vals)}.")
 
 # %% For fast matrix multiply using Numba
 @njit(parallel=True)
@@ -164,7 +178,7 @@ pathlib.Path(val_dir).mkdir(parents=True, exist_ok=True)
 
 # %% Identify and Exclude Zero Ritz Values
 num_zero_ritz_vals = 0
-while num_zero_ritz_vals < num_ritz_vectors and ritz_vals[num_zero_ritz_vals] < 1.0e-8:
+while num_zero_ritz_vals < num_ritz_vectors and abs(ritz_vals[num_zero_ritz_vals]) < 1.0e-12:
     num_zero_ritz_vals += 1
 print(f"Number of zero (or near-zero) Ritz values excluded: {num_zero_ritz_vals}")
 
@@ -195,27 +209,62 @@ print("train_high_freq_samples:", train_high_freq_samples)
 print("train_low_freq_batches:", train_low_freq_batches)
 print("train_high_freq_batches:", train_high_freq_batches)
 
-# Function to generate and save data batches
-def generate_and_save_batches(num_batches, batch_size, freq_type, data_dir, start_index):
+def generate_coef_matrix(num_ritz_used, batch_size, neg_indices, pos_indices,
+                           neg_factor=9.0, weight_neg_only=False):
     """
-    Generates data batches with specified frequency filtering and saves only b vectors.
+    Generates a [num_ritz_used x batch_size] coefficient matrix.
+    
+    If weight_neg_only is True, then only the rows corresponding to negative eigenvalues
+    are nonzero (or are amplified), while the other rows are set to zero in a fraction
+    of the columns. Otherwise, all rows are sampled from a normal distribution,
+    and rows corresponding to negative eigenvalues are multiplied by neg_factor.
+    """
+    # Start with a normal random sample for all Ritz vectors.
+    coef_matrix = np.random.normal(0, 1, (num_ritz_used, batch_size))
+    
+    if weight_neg_only:
+        # For a fraction of columns (say, fraction_neg), force the coefficients for positive
+        # eigenvalue directions to zero.
+        fraction_neg = 0.1  # For example, 10% of the columns are purely negative.
+        num_neg_cols = int(fraction_neg * batch_size)
+        if num_neg_cols > 0 and len(neg_indices) > 0:
+            # Zero out the rows for positive eigenvalue indices for those columns.
+            coef_matrix[pos_indices, :num_neg_cols] = 0.0
+            # Optionally, further amplify negative indices in these columns.
+            coef_matrix[neg_indices, :num_neg_cols] *= neg_factor
+    else:
+        # Multiply negative eigenvalue rows by the neg_factor uniformly.
+        if len(neg_indices) > 0:
+            coef_matrix[neg_indices, :] *= neg_factor
+    
+    return coef_matrix
+
+def generate_and_save_batches(num_batches, batch_size, freq_type, data_dir, start_index,
+                              ritz_vectors, num_ritz_vectors, num_zero_ritz_vals,
+                              neg_indices, pos_indices, neg_factor=9.0, weight_neg_only=False):
+    """
+    Generates and saves data batches using Fourier filtering. This version applies
+    extra weighting to negative eigenvalue directions in the coefficient matrix.
     """
     sample_index = start_index
     for batch_num in range(num_batches):
         t0 = time.time()
-        # Step 1: Generate random coefficients for Ritz vectors
-        coef_matrix = np.random.normal(0, 1, [num_ritz_vectors - num_zero_ritz_vals, batch_size])
-        # Heavily weight the first 'cut_idx' Ritz vectors
-        cut_idx = int(num_ritz_vectors / 2) + args.theta
-        if cut_idx > 0:
-            coef_matrix[0:cut_idx] = 9 * np.random.normal(0, 1, [cut_idx, batch_size])
-        # Step 2: Form x using the Ritz vectors, excluding near-zero Ritz values
-        x_temp = mat_mult(ritz_vectors[num_zero_ritz_vals:num_ritz_vectors].transpose(), coef_matrix).transpose()
-        # Step 3: Normalize x
+        # Generate random coefficients from the Ritz space (excluding near-zero ones)
+        num_ritz_used = num_ritz_vectors - num_zero_ritz_vals
+        coef_matrix = generate_coef_matrix(num_ritz_used, batch_size, neg_indices, pos_indices,
+                                             neg_factor=neg_factor, weight_neg_only=weight_neg_only)
+        
+        # Map the coefficients to x by forming a linear combination of Ritz vectors.
+        # ritz_vectors has shape (num_ritz_vectors, dim_b); we use rows from num_zero_ritz_vals onward.
+        x_temp = mat_mult(ritz_vectors[num_zero_ritz_vals:num_ritz_vectors, :].transpose(),
+                          coef_matrix).transpose()  # shape (batch_size, dim_b)
+        
+        # Normalize each sample in x_temp
         epsilon = 1e-10
-        x_norms = np.linalg.norm(x_temp, axis=1, keepdims=True) + epsilon
-        x_temp_normalized = x_temp / x_norms
-        # Step 4: Apply Fourier Filtering to x
+        norms = np.linalg.norm(x_temp, axis=1, keepdims=True) + epsilon
+        x_temp_normalized = x_temp / norms
+        
+        # Apply Fourier filtering: this step is independent of the coefficient weighting.
         for i in range(batch_size):
             if freq_type == 'low':
                 x_temp_normalized[i] = apply_low_pass_filter(x_temp_normalized[i], low_pass_cutoff_ratio)
@@ -223,23 +272,28 @@ def generate_and_save_batches(num_batches, batch_size, freq_type, data_dir, star
                 x_temp_normalized[i] = apply_high_pass_filter(x_temp_normalized[i], high_pass_cutoff_ratio)
             else:
                 raise ValueError("freq_type must be 'low' or 'high'")
-        # Step 5: Compute b = A * x (using filtered x)
+        
+        # Compute b = A * x for each sample
         b_rhs_temp = np.zeros((batch_size, dim_b), dtype=np.float32)
-        d_rhs_temp = np.zeros((batch_size, N ** 3), dtype=np.float32)
         for i in range(batch_size):
             b_rhs_temp[i] = A.dot(x_temp_normalized[i])
-        half_dim = b_rhs_temp.shape[1]
-        # Step 6: Construct the augmented right-hand side vector d = [b; 0]
+        
+        # Construct the augmented right-hand side vector d = [b; 0] of length N^3
+        d_rhs_temp = np.zeros((batch_size, N ** 3), dtype=np.float32)
         for i in range(batch_size):
-            d_rhs_temp[i, :half_dim] = b_rhs_temp[i]
-        # Step 7: Save only d to files
+            d_rhs_temp[i, :dim_b] = b_rhs_temp[i]
+        
+        # Save each sample to file
         for i in range(batch_size):
             d_filename = os.path.join(data_dir, f'd_{sample_index}.npy')
             np.save(d_filename, d_rhs_temp[i].astype(np.float32))
             sample_index += 1
+        
         t1 = time.time()
         print(f"Batch {batch_num + 1}/{num_batches} for {freq_type}-frequency data saved in {t1 - t0:.2f} seconds.")
     return sample_index
+
+
 
 # %% Generate Training Data
 print("Generating Training Data...")
@@ -247,11 +301,25 @@ sample_index = 0  # Start index for training samples
 
 # Generating 8,000 Low-Frequency Training Samples:
 print("Generating low-frequency training data...")
-sample_index = generate_and_save_batches(train_low_freq_batches, small_matmul_size, 'low', train_dir, sample_index)
+sample_index = generate_and_save_batches(train_low_freq_batches, small_matmul_size, 'low', train_dir, sample_index, ritz_vectors, 
+    num_ritz_vectors, 
+    num_zero_ritz_vals, 
+    neg_indices, 
+    pos_indices, 
+    neg_factor=12.0, 
+    weight_neg_only=False
+)
 
 # Generating 8,000 High-Frequency Training Samples:
 print("Generating high-frequency training data...")
-sample_index = generate_and_save_batches(train_high_freq_batches, small_matmul_size, 'high', train_dir, sample_index)
+sample_index = generate_and_save_batches(train_high_freq_batches, small_matmul_size, 'high', train_dir, sample_index, ritz_vectors, 
+    num_ritz_vectors, 
+    num_zero_ritz_vals, 
+    neg_indices, 
+    pos_indices, 
+    neg_factor=12.0, 
+    weight_neg_only=False
+)
 # After training data generation, sample_index should be 16000
 
 # %% Generate Validation Data
@@ -260,11 +328,27 @@ sample_index = 16000  # Start index for validation samples (adjusted as per your
 
 # Generating 2,000 Low-Frequency Validation Samples:
 print("Generating low-frequency validation data...")
-sample_index = generate_and_save_batches(val_low_freq_batches, small_matmul_size, 'low', val_dir, sample_index)
+sample_index = generate_and_save_batches(val_low_freq_batches, small_matmul_size, 'low', val_dir, sample_index,
+    ritz_vectors, 
+    num_ritz_vectors, 
+    num_zero_ritz_vals, 
+    neg_indices, 
+    pos_indices, 
+    neg_factor=12.0, 
+    weight_neg_only=False
+)
 
 # Generating 2,000 High-Frequency Validation Samples:
 print("Generating high-frequency validation data...")
-sample_index = generate_and_save_batches(val_high_freq_batches, small_matmul_size, 'high', val_dir, sample_index)
+sample_index = generate_and_save_batches(val_high_freq_batches, small_matmul_size, 'high', val_dir, sample_index,
+    ritz_vectors, 
+    num_ritz_vectors, 
+    num_zero_ritz_vals, 
+    neg_indices, 
+    pos_indices, 
+    neg_factor=12.0, 
+    weight_neg_only=False
+)
 
 print("Dataset generation completed.")
 

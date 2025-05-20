@@ -26,8 +26,7 @@
                 "--CUDA_VISIBLE_DEVICES", "1",
                 "--skip_ilupmr",
                 "--skip_icpmr",
-                "--skip_bdpmr",
-                "--skip_alpmr"
+                "--skip_deepmr"
             ]
         }
     ]

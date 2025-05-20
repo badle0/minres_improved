@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/data/hsheng/virtualenvs/minres_improved/build",
+  "command": "/usr/bin/c++   -g -o CMakeFiles/example.dir/example.o -c /data/hsheng/virtualenvs/minres_improved/external/cxxopts/src/example.cpp",
+  "file": "/data/hsheng/virtualenvs/minres_improved/external/cxxopts/src/example.cpp"
+}
+]

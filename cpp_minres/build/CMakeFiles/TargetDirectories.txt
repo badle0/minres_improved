@@ -1,0 +1,4 @@
+/data/hsheng/virtualenvs/minres_improved/cpp_minres/build/CMakeFiles/minres_test.dir
+/data/hsheng/virtualenvs/minres_improved/cpp_minres/build/CMakeFiles/generate_testdata.dir
+/data/hsheng/virtualenvs/minres_improved/cpp_minres/build/CMakeFiles/edit_cache.dir
+/data/hsheng/virtualenvs/minres_improved/cpp_minres/build/CMakeFiles/rebuild_cache.dir

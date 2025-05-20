@@ -1,0 +1,1 @@
+/usr/bin/c++ -fsanitize=address CMakeFiles/generate_testdata.dir/GenerateTestData.cpp.o -o generate_testdata  -Wl,-rpath,/data/hsheng/virtualenvs/onnxruntime/onnxruntime-linux-x64-gpu-1.20.0/lib /data/hsheng/virtualenvs/onnxruntime/onnxruntime-linux-x64-gpu-1.20.0/lib/libonnxruntime.so 

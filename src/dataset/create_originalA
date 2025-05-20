@@ -1,0 +1,104 @@
+import numpy as np
+import scipy.sparse as sp
+from scipy.sparse.linalg import eigsh
+import struct
+import os
+import sys
+
+# Setting up directory paths for importing custom modules
+dir_path = os.path.dirname(os.path.realpath(__file__))
+lib_path = os.path.abspath(os.path.join(dir_path, '../../lib'))
+sys.path.insert(1, lib_path)
+
+import helper_functions as hf   
+
+# ------------------ Parameters ------------------
+N = 64  # grid resolution (use 64 or 128 to match CNN)
+neg_fraction = 0.50  # fraction of negative eigenvalues wanted
+dtype = 'f'  # store as float32 for compatibility
+
+output_dir = "/data/hsheng/virtualenvs/minres_improved/2024minresdata/matrixA"
+os.makedirs(output_dir, exist_ok=True)
+spd_filename    = os.path.join(output_dir, f"A_oriN{N}.bin")
+indef_filename  = os.path.join(output_dir, f"A_indefN{N}.bin")
+
+# ------------------ Step 1: Generate SPD Poisson Matrix ------------------
+def poisson_7pt_neumann(N):
+    n = N**3
+    diag, off = 6.0*np.ones(n), -1.0*np.ones(n)
+    idx = lambda i,j,k: (k*N + j)*N + i
+    rows, cols, data = [], [], []
+
+    for k in range(N):
+        for j in range(N):
+            for i in range(N):
+                p = idx(i,j,k)
+                rows.append(p); cols.append(p); data.append(diag[p])
+                if i>0:    rows.append(p); cols.append(idx(i-1,j,k)); data.append(off[p])
+                if i<N-1:  rows.append(p); cols.append(idx(i+1,j,k)); data.append(off[p])
+                if j>0:    rows.append(p); cols.append(idx(i,j-1,k)); data.append(off[p])
+                if j<N-1:  rows.append(p); cols.append(idx(i,j+1,k)); data.append(off[p])
+                if k>0:    rows.append(p); cols.append(idx(i,j,k-1)); data.append(off[p])
+                if k<N-1:  rows.append(p); cols.append(idx(i,j,k+1)); data.append(off[p])
+    return sp.csr_matrix((data, (rows, cols)), shape=(n, n), dtype=np.float32)
+
+A_spd = poisson_7pt_neumann(N)
+
+# ------------------ Step 2: Choose Shift ------------------
+def choose_shift(A, neg_fraction=0.5):
+    lmin = eigsh(A, k=1, which="SA", return_eigenvectors=False)[0]
+    lmax = eigsh(A, k=1, which="LA", return_eigenvectors=False)[0]
+    sigma = lmax - neg_fraction * (lmax - lmin)
+    assert lmin > 0 and 0 < sigma < lmax, "Shift would cause singularity."
+    return float(sigma)
+
+sigma = choose_shift(A_spd, neg_fraction=neg_fraction)
+print(f"Using σ = {sigma:.6e} to shift the matrix")
+
+# ------------------ Step 3: Build Indefinite Matrix ------------------
+def make_indefinite_copy(A, sigma):
+    A_indef = A.copy()
+    A_indef.setdiag(A_indef.diagonal() - sigma)
+    return A_indef
+
+A_indef = make_indefinite_copy(A_spd, sigma)
+
+# ------------------ Step 4: Binary Writer ------------------
+def writeA_sparse(filename, A, dtype='f'):
+    assert dtype in ('f', 'd')
+    num_rows, num_cols = map(int, A.shape)
+    nnz = int(A.nnz)
+    outS = num_rows
+    innS = nnz
+    len_data = 4 if dtype == 'f' else 8
+    data_view = A.data.astype(np.float32 if dtype == 'f' else np.float64)
+
+    with open(filename, 'wb') as f:
+        f.write(struct.pack('i', num_rows))
+        f.write(struct.pack('i', num_cols))
+        f.write(struct.pack('i', nnz))
+        f.write(struct.pack('i', outS))
+        f.write(struct.pack('i', innS))
+        f.write(data_view.tobytes())
+        f.write(A.indptr[:-1].astype(np.int32).tobytes())
+        f.write(A.indices.astype(np.int32).tobytes())
+
+# ------------------ Step 5: Save Both Matrices ------------------
+writeA_sparse(spd_filename,   A_spd,   dtype=dtype)
+writeA_sparse(indef_filename, A_indef, dtype=dtype)
+
+print(f"Matrices saved to {output_dir}")
+print("SPD matrix:     ", spd_filename)
+print("Indefinite matrix:", indef_filename)
+
+matrix_path = f"/data/hsheng/virtualenvs/minres_improved/2024minresdata/matrixA/A_indefN{N}.bin"
+
+# Load the matrix (CSR format, float32)
+A_test = hf.readA_sparse(N, matrix_path, dtype='f')
+
+# Print smallest and largest eigenvalue (approximate)
+λ_min = eigsh(A_test, k=1, which="SA", return_eigenvectors=False)[0]
+λ_max = eigsh(A_test, k=1, which="LA", return_eigenvectors=False)[0]
+
+print(f"smallest λ ≈ {λ_min:.6e}")
+print(f"largest  λ ≈ {λ_max:.6e}")

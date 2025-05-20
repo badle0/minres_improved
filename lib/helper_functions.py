@@ -59,35 +59,62 @@ def readA(dim, filenameA):
     return mat_A
 
 
-def readA_sparse(dim, filenameA, dtype='d'):
-    """Read a sparse matrix from a custom binary file."""
+def readA_sparse(dim, filenameA, dtype = 'd'):                                                                                                                                                              
+    dim2 = dim**3
+    cols = []
+    outerIdxPtr = []
+    rows = []
     if dtype == 'd':
-        len_data = 8  # 8 bytes for float64
-        data_format = 'd'
+        len_data = 8        
     elif dtype == 'f':
-        len_data = 4  # 4 bytes for float32
-        data_format = 'f'
-    else:
-        raise ValueError("Unsupported data type.")
-
+        len_data = 4     
+    #reading the bit files
     with open(filenameA, 'rb') as f:
-        length = 4
+        length = 4;
         b = f.read(length)
         num_rows = struct.unpack('i', b)[0]
-        b = f.read(length)
+        b = f.read(length);
         num_cols = struct.unpack('i', b)[0]
-        b = f.read(length)
+        b = f.read(length);
         nnz = struct.unpack('i', b)[0]
-        b = f.read(length)
+        b = f.read(length);
         outS = struct.unpack('i', b)[0]
-        b = f.read(length)
+        b = f.read(length);
         innS = struct.unpack('i', b)[0]
-
-        data = np.frombuffer(f.read(nnz * len_data), dtype=np.float32 if dtype == 'f' else np.float64)
-        indptr = np.frombuffer(f.read(outS * 4), dtype=np.int32)
-        indices = np.frombuffer(f.read(nnz * 4), dtype=np.int32)
-
-    return sparse.csr_matrix((data, indices, indptr), shape=(num_rows, num_cols))
+        #print("nnz = ",nnz)
+        #print("num_rows = ", num_rows)
+        #print("num_cols = ",num_cols)
+        #print("outS = ", outS)
+        #print("innS = ", innS)
+        data = [0.0] * nnz
+        outerIdxPtr = [0]*outS
+        cols = [0]*nnz
+        rows = [0]*nnz
+        for i in range(nnz):
+            #length = 8
+            b = f.read(len_data)
+            data[i] = struct.unpack(dtype, b)[0]
+            
+        for i in range(outS):
+            length = 4
+            b = f.read(length)
+            outerIdxPtr[i] = struct.unpack('i', b)[0]
+            
+        for i in range(nnz):
+            length = 4
+            b = f.read(length)
+            cols[i] = struct.unpack('i', b)[0]
+     
+    #print(num_rows, num_cols, nnz, outS, innS) 
+    outerIdxPtr = outerIdxPtr + [nnz]
+    for ii in range(num_rows):
+        #print(ii," ; ",outerIdxPtr[ii])
+        rows[outerIdxPtr[ii]:outerIdxPtr[ii+1]] = [ii]*(outerIdxPtr[ii+1] - outerIdxPtr[ii])
+     
+     
+    #print(nnz,len(rows),len(cols),len(data))
+    #print(outerIdxPtr[num_rows-1])
+    return sparse.csr_matrix((data, (rows, cols)),[dim2,dim2])
 
 def readA_sparse1(dim, filenameA, dtype = 'd'):                                                                                                                                                              
     dim2 = dim**3

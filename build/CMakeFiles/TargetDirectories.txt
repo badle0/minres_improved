@@ -1,0 +1,3 @@
+/data/hsheng/virtualenvs/minres_improved/build/CMakeFiles/example.dir
+/data/hsheng/virtualenvs/minres_improved/build/CMakeFiles/edit_cache.dir
+/data/hsheng/virtualenvs/minres_improved/build/CMakeFiles/rebuild_cache.dir

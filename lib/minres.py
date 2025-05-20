@@ -566,6 +566,132 @@ class MINRESSparse:
         print("Deep MINRES stopped" + msg[istop])
 
         return x
+    
+    @staticmethod
+    def solve_2x2_via_givens(A2, b2):
+        # implementation here
+        # (use exactly the same code as before, but now it’s a static method)
+        import math
+        a11, a12 = A2[0, 0], A2[0, 1]
+        a21, a22 = A2[1, 0], A2[1, 1]
+        r = math.hypot(a11, a21)
+        if abs(r) < 1e-14:
+            return np.array([0.0, 0.0])
+        c = a11 / r
+        s = a21 / r
+        a12_new = c * a12 + s * a22
+        a22_new = -s * a12 + c * a22
+        b1, b2_ = b2[0], b2[1]
+        b1_new = c * b1 + s * b2_
+        b2_new = -s * b1 + c * b2_
+        if abs(a22_new) < 1e-14:
+            x2 = 0.0
+        else:
+            x2 = b2_new / a22_new
+        x1 = (b1_new - a12_new * x2) / r
+        return np.array([x1, x2])
+
+    def deepminres_givens2(self, b, x0, model_predict,  
+                       max_iter=100, tol=1e-10, verbose=False):
+        """
+        A 'two-direction Givens' approach to indefinite problems.
+        Each iteration:
+        1) We have r_k = b - A x_k
+        2) We get a new net direction d_k = model_predict(r_k)
+        3) We form M = [A d_old, A d_k] in R^{n x 2}, where d_old is last iteration's direction
+        4) Solve alpha = arg min ||r_k - M alpha|| via a small 2D Givens or direct solve
+        5) Update x_{k+1} = x_k + alpha[0]*d_old + alpha[1]*d_k
+        6) r_{k+1} = r_k - ( alpha[0]*A d_old + alpha[1]*A d_k )
+
+        This can handle indefinite directions better than a single line search.
+        """
+
+        # 2) Initialize
+        x = x0.copy()
+        r = b - self.multiply_A_sparse(x)
+        res_norm = np.linalg.norm(r)
+        b_norm = np.linalg.norm(b)
+        if b_norm == 0:
+            b_norm = 1.0
+
+        if verbose:
+            print(f"[Givens2] Iter=0, residual={res_norm:e}")
+
+        # We'll store the last direction d_old
+        d_old = None
+        Ad_old = None
+
+        res_history = [res_norm]
+
+        for k in range(max_iter):
+            # 2a) Stopping criterion
+            if res_norm / b_norm < tol:
+                break
+
+            # 2b) Get new direction from net
+            d_k = model_predict(r)
+            Ad_k = self.multiply_A_sparse(d_k)
+
+            # 2c) Build the 2D matrix M = [Ad_old, Ad_k]
+            # If d_old is None (first iteration), we do a single-line approach
+            if d_old is None:
+                # fallback to normal line search or skip for the first iteration
+                denom = np.dot(d_k, Ad_k)
+                if abs(denom) < 1e-14:
+                    alpha_single = 0.0
+                else:
+                    alpha_single = np.dot(r, Ad_k)/denom
+                x = x + alpha_single * d_k
+                r = r - alpha_single * Ad_k
+                res_norm = np.linalg.norm(r)
+                res_history.append(res_norm)
+                if verbose:
+                    print(f"[Givens2] Iter={k+1}, alpha(single)={alpha_single:.3e}, res={res_norm:.3e}")
+                # store for next iteration
+                d_old = d_k
+                Ad_old = Ad_k
+                continue
+            else:
+                M = np.column_stack([Ad_old, Ad_k])  # n x 2 matrix
+
+            # 2d) We solve alpha = arg min ||r - M alpha|| in R^2
+            # That is the normal eqn: (M^T M) alpha = M^T r. We'll do Givens or direct.
+
+            # 2d-i) Direct solve (2x2):
+            MtM = M.T @ M   # shape (2,2)
+            Mtr = M.T @ r   # shape (2,)
+
+            # Optionally do a check if MtM is singular or indefinite
+            # We'll do a safe solve with a small shift if needed:
+            # *BUT* let's do Givens rotation approach, for demonstration:
+
+            # 2d-ii) Givens approach on M, r:
+            # Typically you'd do QR or something. We'll show an explicit approach:
+
+            # For simplicity, let's just do a direct 2x2 solve here:
+            # alpha_2x2 = np.linalg.solve(MtM, Mtr) => This is the normal eq
+            # We'll define a small function that does a stable 2x2 solve w/ Givens:
+
+            alpha_vec = self.solve_2x2_via_givens(MtM, Mtr)
+
+            alpha_dold = alpha_vec[0]
+            alpha_dk   = alpha_vec[1]
+
+            # 2e) Update x, r
+            x = x + alpha_dold*d_old + alpha_dk*d_k
+            r = r - alpha_dold*Ad_old - alpha_dk*Ad_k
+
+            # 2f) measure new residual
+            res_norm = np.linalg.norm(r)
+            res_history.append(res_norm)
+
+            if verbose:
+                print(f"[Givens2] Iter={k+1}, alpha=({alpha_dold:.3e},{alpha_dk:.3e}), res={res_norm:.3e}")
+
+            # shift old directions
+            d_old, Ad_old = d_k, Ad_k
+
+        return x, res_history
 
     def create_diagonal_preconditioner(self):
         """
